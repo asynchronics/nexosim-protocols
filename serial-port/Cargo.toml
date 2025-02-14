@@ -20,7 +20,8 @@ tracing = ["dep:tracing", "nexosim/tracing"]
 
 [dependencies]
 bytes = "1.10"
-confique = "0.2.5"
+schematic = "0.17"
+serde = "1"
 mio = "1"
 mio-serial = "5"
 nexosim = { workspace = true }
@@ -30,5 +31,6 @@ tracing = { version = "0.1.40", default-features = false, features = [
 ], optional = true }
 
 [dev-dependencies]
+schematic = { version = "0.17", features = [ "yaml" ] }
 serialport = "4.7"
 nexosim-byte-utils = { path = "../byte-utils" }

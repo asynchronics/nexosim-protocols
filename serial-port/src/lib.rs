@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 
-use confique::Config;
+use schematic::Config;
 
 use mio::{Events, Interest, Poll, Token, Waker};
 use mio_serial::SerialPortBuilderExt;
@@ -38,18 +38,18 @@ pub struct SerialPortConfig {
     /// Baud rate.
     ///
     /// Zero value shall be used for software TTY interfaces.
-    #[config(default = 0)]
+    #[setting(default = 0)]
     pub baud_rate: u32,
 
     /// Serial port path.
-    #[config(default = "/tmp/ttyS20")]
+    #[setting(default = "/tmp/ttyS20")]
     pub port_path: String,
 
     /// Internal buffer size.
     ///
     /// Input is read and injected into the simulation by blocks up to buffer
     /// size.
-    #[config(default = 256)]
+    #[setting(default = 256)]
     pub buffer_size: usize,
 
     /// Time shift, in milliseconds, for scheduling events at the present moment.

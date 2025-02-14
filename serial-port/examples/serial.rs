@@ -25,7 +25,7 @@
 use std::thread::{self, sleep};
 use std::time::Duration;
 
-use confique::{Config, Partial};
+use schematic::{ConfigLoader, Format};
 
 use nexosim::model::{Context, Model};
 use nexosim::ports::{BlockingEventQueue, Output};
@@ -250,12 +250,15 @@ fn main() -> Result<(), SimulationError> {
 
 /// Gets serial port configuration.
 fn get_serial_port_cfg(path: &str) -> SerialPortConfig {
-    let mut partial_cfg = <SerialPortConfig as Config>::Partial::empty();
-    partial_cfg.port_path = Some(path.to_string());
-    partial_cfg.delta = Some(DELTA);
-    partial_cfg.period = Some(PERIOD);
-    SerialPortConfig::builder()
-        .preloaded(partial_cfg)
-        .load()
-        .unwrap()
+    let mut loader = ConfigLoader::<SerialPortConfig>::new();
+    loader
+        .code(format!("portPath: {}", path), Format::Yaml)
+        .unwrap();
+    loader
+        .code(format!("delta: {}", DELTA), Format::Yaml)
+        .unwrap();
+    loader
+        .code(format!("period: {}", PERIOD), Format::Yaml)
+        .unwrap();
+    loader.load().unwrap().config
 }
