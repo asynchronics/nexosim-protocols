@@ -1,0 +1,7 @@
+[workspace]
+members = ["byte-utils", "serial-port"]
+resolver = "2"
+
+[workspace.dependencies]
+nexosim = { git = "https://github.com/asynchronics/nexosim.git", rev = "0efab" }
+nexosim-util = { git = "https://github.com/asynchronics/nexosim.git", rev = "0efab" }

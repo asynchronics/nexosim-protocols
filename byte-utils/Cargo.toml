@@ -1,0 +1,21 @@
+[package]
+name = "nexosim-byte-utils"
+version = "0.1.0"
+edition = "2021"
+description="""
+Byte and stream manipulation utilities for NeXosim-based simulations.
+"""
+categories = ["simulation", "aerospace", "science"]
+keywords = [
+    "simulation",
+    "discrete-event",
+    "systems",
+    "cyberphysical",
+    "real-time",
+    "stream",
+]
+
+[dependencies]
+buf-list = "1"
+bytes = "1.10"
+nexosim = { workspace = true }

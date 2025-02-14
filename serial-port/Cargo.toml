@@ -1,0 +1,34 @@
+[package]
+name = "nexosim-serial-port"
+version = "0.1.0"
+edition = "2021"
+description="""
+Serial port model for NeXosim-based simulations.
+"""
+categories = ["simulation", "aerospace", "science"]
+keywords = [
+    "simulation",
+    "discrete-event",
+    "systems",
+    "cyberphysical",
+    "real-time",
+    "serial-port",
+]
+
+[features]
+tracing = ["dep:tracing", "nexosim/tracing"]
+
+[dependencies]
+bytes = "1.10"
+confique = "0.2.5"
+mio = "1"
+mio-serial = "5"
+nexosim = { workspace = true }
+nexosim-util = { workspace = true }
+tracing = { version = "0.1.40", default-features = false, features = [
+    "std",
+], optional = true }
+
+[dev-dependencies]
+serialport = "4.7"
+nexosim-byte-utils = { path = "../byte-utils" }
