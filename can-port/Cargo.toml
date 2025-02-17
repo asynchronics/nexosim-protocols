@@ -1,0 +1,35 @@
+[package]
+name = "nexosim-can-port"
+version = "0.1.0"
+edition = "2024"
+description="""
+CAN port model for NeXosim-based simulations.
+"""
+categories = ["simulation", "aerospace", "science"]
+keywords = [
+    "simulation",
+    "discrete-event",
+    "systems",
+    "cyberphysical",
+    "real-time",
+    "serial-port",
+]
+
+[features]
+tracing = ["dep:tracing", "nexosim/tracing"]
+
+[dependencies]
+mio = { version = "1.0", features = ["os-poll", "os-ext"] }
+nexosim = { workspace = true }
+nexosim-util = { workspace = true }
+nexosim-io-utils = { path = "../io-utils" }
+serde = "1"
+schematic = { workspace = true }
+socketcan = { version = "3.3" }
+tracing = { version = "0.1.40", default-features = false, features = [
+    "std",
+], optional = true }
+
+[dev-dependencies]
+schematic = { workspace = true, features = [ "toml" ] }
+tracing-subscriber = "0.3"
