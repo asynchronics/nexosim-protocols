@@ -32,5 +32,5 @@ tracing = { version = "0.1.40", default-features = false, features = [
 
 [dev-dependencies]
 schematic = { version = "0.17", features = [ "yaml" ] }
-serialport = "4.7"
+serialport = {version = "4.7", default-features = false}
 nexosim-byte-utils = { path = "../byte-utils" }
