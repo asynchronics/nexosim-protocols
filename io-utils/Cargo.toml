@@ -1,5 +1,5 @@
 [package]
-name = "nexosim-byte-utils"
+name = "nexosim-io-utils"
 # When incrementing version and releasing to crates.io:
 # - Update crate version in this Cargo.toml
 # - Update dependency in sibling crates
@@ -10,7 +10,7 @@ name = "nexosim-byte-utils"
 version = "0.1.0"
 edition = "2021"
 description="""
-Byte and stream manipulation utilities for NeXosim-based simulations.
+I/O utilities for NeXosim-based simulations.
 """
 categories = ["simulation", "aerospace", "science"]
 keywords = [
@@ -23,6 +23,9 @@ keywords = [
 ]
 
 [dependencies]
-buf-list = "1"
-bytes = "1.10"
-nexosim = { workspace = true }
+mio = { workspace = true }
+nexosim-util = { workspace = true }
+
+[dev-dependencies]
+bytes = { workspace = true }
+mio = { workspace = true, features = ["net"] }

@@ -10,19 +10,15 @@
 #![forbid(unsafe_code)]
 
 use std::fmt;
-use std::io::{ErrorKind, Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
-use std::thread::{self, JoinHandle};
+use std::io::{ErrorKind, Read, Result as IoResult, Write};
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 
 use schematic::Config;
 
-use mio::{Events, Interest, Poll, Token, Waker};
-use mio_serial::SerialPortBuilderExt;
+use mio::{Interest, Registry, Token};
+use mio_serial::{SerialPortBuilderExt, SerialStream};
 
 #[cfg(feature = "tracing")]
 use tracing::info;
@@ -30,9 +26,9 @@ use tracing::info;
 use nexosim::model::{Context, InitializedModel, Model, ProtoModel};
 use nexosim::ports::Output;
 
-use nexosim_util::joiners::ThreadJoiner;
+use nexosim_io_utils::port::{IoPort, IoThread};
 
-/// Serial port model instance config.
+/// Serial port model instance configuration.
 #[derive(Config, Debug)]
 pub struct SerialPortConfig {
     /// Baud rate.
@@ -42,100 +38,136 @@ pub struct SerialPortConfig {
     pub baud_rate: u32,
 
     /// Serial port path.
-    #[setting(default = "/tmp/ttyS20")]
     pub port_path: String,
 
     /// Internal buffer size.
     ///
-    /// Input is read and injected into the simulation by blocks up to buffer
+    /// Input is read and forwarded to the simulation by blocks up to buffer
     /// size.
     #[setting(default = 256)]
     pub buffer_size: usize,
 
-    /// Time shift, in milliseconds, for scheduling events at the present moment.
+    /// Delay for the first scheduled data forwarding, in milliseconds.
     ///
     /// If no value is provided, `period` is used.
     pub delta: Option<u64>,
 
-    /// Activation period, in milliseconds, for cyclic activities inside the simulation.
+    /// Period at which data from the serial port is forwarded into the
+    /// simulation, in milliseconds.
     ///
-    /// If no value is provided, cyclic activities are not scheduled
+    /// If no value is provided, periodic activities are not scheduled
     /// automatically.
     pub period: Option<u64>,
 }
 
+struct SerialPortInner {
+    port: SerialStream,
+    buffer: Vec<u8>,
+}
+
+impl SerialPortInner {
+    fn new(port_path: &str, baud_rate: u32, buffer_size: usize) -> Self {
+        // Until read_buf (RFC 2930) is stabilized we need an initialized
+        // buffer.
+        Self {
+            port: mio_serial::new(port_path, baud_rate)
+                .open_native_async()
+                .unwrap(),
+            buffer: vec![0; buffer_size],
+        }
+    }
+}
+
+impl IoPort<SerialStream, Bytes, Bytes> for SerialPortInner {
+    fn register(&mut self, registry: &Registry) -> Token {
+        registry
+            .register(&mut self.port, Token(0), Interest::READABLE)
+            .unwrap();
+        Token(1)
+    }
+
+    fn read(&mut self, token: Token) -> IoResult<Bytes> {
+        if token == Token(0) {
+            self.port
+                .read(&mut self.buffer)
+                .map(|len| BytesMut::from(&self.buffer[..len]).into())
+        } else {
+            // Unknown event: should never happen.
+            Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                "Unknown event.",
+            ))
+        }
+    }
+
+    fn write(&mut self, data: &Bytes) -> IoResult<()> {
+        self.port.write(data).map(|len| {
+            if len != data.len() {
+                Err(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!(
+                        "Not all bytes written: had to write {}, but wrote {}.",
+                        data.len(),
+                        len
+                    ),
+                ))
+            } else {
+                Ok(())
+            }
+        })?
+    }
+}
+
 /// Serial port model.
 ///
-/// This model
-/// * listens the specified serial port and injects into the simulation values
-///   read from it as raw bytes,
-/// * outputs raw bytes from the simulation to the serial port.
+/// This model:
+/// * listens to the configured serial port and forwards its data to the model
+///   output,
+/// * forwards data from the model input to the serial port.
 pub struct SerialPort {
     /// Data from serial port -- output port.
-    pub received_data: Output<Bytes>,
+    pub bytes_out: Output<Bytes>,
 
-    /// Data receiver to the simulation.
-    receiver: Receiver<Bytes>,
-
-    /// Data transmitter from the simulation.
-    transmitter: Sender<Bytes>,
-
-    /// Model instance config.
+    /// Model instance configuration.
     config: SerialPortConfig,
 
-    /// I/O thread waker.
-    waker: Arc<Waker>,
-
-    /// The simulation halt flag.
-    is_halted: Arc<AtomicBool>,
-
-    /// I/O thread guard.
-    io_thread: Option<ThreadJoiner<()>>,
+    io_thread: IoThread<Bytes, Bytes>,
 }
 
 impl SerialPort {
     /// Creates a new serial port model.
     fn new(
-        receiver: Receiver<Bytes>,
-        transmitter: Sender<Bytes>,
-        received_data: Output<Bytes>,
+        bytes_out: Output<Bytes>,
         config: SerialPortConfig,
-        waker: Arc<Waker>,
-        is_halted: Arc<AtomicBool>,
-        io_thread: JoinHandle<()>,
+        io_thread: IoThread<Bytes, Bytes>,
     ) -> Self {
         Self {
-            received_data,
-            receiver,
-            transmitter,
+            bytes_out,
             config,
-            waker,
-            is_halted,
-            io_thread: Some(ThreadJoiner::new(io_thread)),
-        }
-    }
-
-    /// Processes the data received on the serial port.
-    async fn process(&mut self) {
-        while let Ok(data) = self.receiver.try_recv() {
-            #[cfg(feature = "tracing")]
-            info!(
-                "Received data on the serial port {}: {:X}.",
-                self.config.port_path, data
-            );
-            self.received_data.send(data).await;
+            io_thread,
         }
     }
 
     /// Sends raw bytes to the serial port -- input port.
-    pub async fn send_bytes(&mut self, data: Bytes) {
+    pub async fn bytes_in(&mut self, data: Bytes) {
         #[cfg(feature = "tracing")]
         info!(
             "Will send data to the serial port {}: {:X}.",
             self.config.port_path, data
         );
-        self.transmitter.send(data).unwrap();
-        self.waker.wake().unwrap();
+        self.io_thread.send(data).unwrap();
+    }
+
+    /// Forwards the raw bytes received on the serial port.
+    pub async fn process(&mut self) {
+        while let Ok(data) = self.io_thread.try_recv() {
+            #[cfg(feature = "tracing")]
+            info!(
+                "Received data on the serial port {}: {:X}.",
+                self.config.port_path, data
+            );
+            self.bytes_out.send(data).await;
+        }
     }
 }
 
@@ -160,14 +192,6 @@ impl Model for SerialPort {
     }
 }
 
-impl Drop for SerialPort {
-    fn drop(&mut self) {
-        self.is_halted.store(true, Ordering::Relaxed);
-        let _ = self.waker.wake();
-        let _ = self.io_thread.take().unwrap().join();
-    }
-}
-
 impl fmt::Debug for SerialPort {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("SerialPort").finish_non_exhaustive()
@@ -177,7 +201,7 @@ impl fmt::Debug for SerialPort {
 /// Serial port model prototype.
 pub struct ProtoSerialPort {
     /// Data from serial port -- output port.
-    pub received_data: Output<Bytes>,
+    pub bytes_out: Output<Bytes>,
 
     /// Serial port model instance config.
     config: SerialPortConfig,
@@ -188,76 +212,8 @@ impl ProtoSerialPort {
     pub fn new(config: SerialPortConfig) -> Self {
         Self {
             config,
-            received_data: Output::new(),
+            bytes_out: Output::new(),
         }
-    }
-
-    /// Starts the I/O thread.
-    fn start_io(
-        port_path: &str,
-        baud_rate: u32,
-        tx: Sender<Bytes>,
-        rx: Receiver<Bytes>,
-        buffer_size: usize,
-        is_halted: Arc<AtomicBool>,
-    ) -> (JoinHandle<()>, Arc<Waker>) {
-        let mut poll = Poll::new().unwrap();
-        let mut events = Events::with_capacity(256);
-        let mut port = mio_serial::new(port_path, baud_rate)
-            .open_native_async()
-            .unwrap();
-
-        let serial = Token(0);
-        let wake = Token(1);
-
-        let waker = Arc::new(Waker::new(poll.registry(), wake).unwrap());
-        poll.registry()
-            .register(&mut port, serial, Interest::READABLE)
-            .unwrap();
-
-        // I/O thread.
-        let io_thread = thread::spawn(move || {
-            'poll: loop {
-                // This call is blocking.
-                poll.poll(&mut events, None).unwrap();
-
-                for event in events.iter() {
-                    if event.token() == serial {
-                        loop {
-                            // Until read_buf (RFC 2930) is stabilized we need an initialized
-                            // buffer.
-                            let mut message = BytesMut::zeroed(buffer_size);
-                            match port.read(&mut message) {
-                                Ok(len) => {
-                                    message.truncate(len);
-                                    if tx.send(message.into()).is_err() {
-                                        break 'poll;
-                                    }
-                                }
-                                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                                    break;
-                                }
-                                _ => break 'poll,
-                            }
-                        }
-                    } else if event.token() == wake {
-                        if is_halted.load(Ordering::Relaxed) {
-                            break 'poll;
-                        }
-                        while let Ok(data) = rx.try_recv() {
-                            if port.write(&data).is_err() {
-                                break 'poll;
-                            }
-                        }
-                    } else {
-                        // Unknown event: should never happen.
-                        break 'poll;
-                    }
-                }
-            }
-        });
-
-        (io_thread, waker)
     }
 }
 
@@ -265,29 +221,13 @@ impl ProtoModel for ProtoSerialPort {
     type Model = SerialPort;
 
     fn build(self, _: &mut nexosim::model::BuildContext<Self>) -> Self::Model {
-        let (rtx, rrx) = channel();
-        let (ttx, trx) = channel();
-
-        let is_halted = Arc::new(AtomicBool::new(false));
-
-        let (io_thread, waker) = Self::start_io(
+        let port = SerialPortInner::new(
             &self.config.port_path,
             self.config.baud_rate,
-            rtx,
-            trx,
             self.config.buffer_size,
-            is_halted.clone(),
         );
 
-        Self::Model::new(
-            rrx,
-            ttx,
-            self.received_data,
-            self.config,
-            waker,
-            is_halted,
-            io_thread,
-        )
+        Self::Model::new(self.bytes_out, self.config, IoThread::new(port))
     }
 }
 

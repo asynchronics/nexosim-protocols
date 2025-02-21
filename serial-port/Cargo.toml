@@ -1,5 +1,12 @@
 [package]
 name = "nexosim-serial-port"
+# When incrementing version and releasing to crates.io:
+# - Update crate version in this Cargo.toml
+# - Update dependency in sibling crates
+# - Remove path dependencies
+# - Update CHANGELOG.md
+# - Update if necessary copyright notice in LICENSE-MIT
+# - Create a "vX.Y.Z" git tag
 version = "0.1.0"
 edition = "2021"
 description="""
@@ -19,18 +26,19 @@ keywords = [
 tracing = ["dep:tracing", "nexosim/tracing"]
 
 [dependencies]
-bytes = "1.10"
+bytes = { workspace = true }
 schematic = "0.17"
 serde = "1"
-mio = "1"
+mio = { workspace = true }
 mio-serial = "5"
 nexosim = { workspace = true }
-nexosim-util = { workspace = true }
+nexosim-io-utils = { path = "../io-utils" }
 tracing = { version = "0.1.40", default-features = false, features = [
     "std",
 ], optional = true }
 
 [dev-dependencies]
-schematic = { version = "0.17", features = [ "yaml" ] }
+schematic = { version = "0.17", features = [ "toml" ] }
 serialport = {version = "4.7", default-features = false}
+nexosim-util = { workspace = true }
 nexosim-byte-utils = { path = "../byte-utils" }

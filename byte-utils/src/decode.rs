@@ -8,14 +8,14 @@ use bytes::{Buf, Bytes};
 use nexosim::model::Model;
 use nexosim::ports::Output;
 
-/// Decoding result.
+/// Buffer decoding result.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum DecoderResult<T, E> {
+pub enum BufDecoderResult<T, E> {
     /// An error.
     Error(E),
-    /// The input buffer consumed, nothing decoded.
+    /// Input buffer consumed, nothing decoded.
     Empty,
-    /// The input buffer consumed, message decoding in progress.
+    /// Input buffer consumed, message decoding in progress.
     Partial,
     /// Part of the input ignored, there is more data.
     Ignored,
@@ -29,13 +29,13 @@ pub trait BufDecoder<T> {
     type Error;
 
     /// Decodes part of the input buffer consuming it.
-    fn decode<B: Buf>(&mut self, buf: &mut B) -> DecoderResult<T, Self::Error>;
+    fn decode<B: Buf>(&mut self, buf: &mut B) -> BufDecoderResult<T, Self::Error>;
 }
 
 /// Byte stream decoder model.
 pub struct ByteStreamDecoder<T: Clone + Send + 'static, D: BufDecoder<T> + Send + 'static> {
     /// Decoded data.
-    pub decoded_data: Output<T>,
+    pub data_out: Output<T>,
 
     /// Internal buffer.
     buf: BufList,
@@ -52,19 +52,19 @@ where
     /// Creates new byte stream decoder model.
     pub fn new(decoder: D) -> Self {
         Self {
-            decoded_data: Output::new(),
+            data_out: Output::new(),
             buf: BufList::new(),
             decoder,
         }
     }
 
     /// Input bytes -- input port.
-    pub async fn input_bytes(&mut self, data: Bytes) {
+    pub async fn bytes_in(&mut self, data: Bytes) {
         self.buf.push_chunk(data);
         loop {
             match self.decoder.decode(&mut self.buf) {
-                DecoderResult::Decoded(data) => self.decoded_data.send(data).await,
-                DecoderResult::Ignored => {}
+                BufDecoderResult::Decoded(data) => self.data_out.send(data).await,
+                BufDecoderResult::Ignored => {}
                 _ => break,
             }
         }
@@ -92,7 +92,7 @@ where
 pub type DecodeCallback<T> = Box<dyn Fn(&[u8]) -> T + Send + 'static>;
 
 /// Packet decoder.
-pub struct SimpleDelimiterDecoder<T: Clone + Send + 'static> {
+pub struct ByteDelimitedDecoder<T: Clone + Send + 'static> {
     /// Packet start delimiter.
     start: u8,
 
@@ -109,7 +109,7 @@ pub struct SimpleDelimiterDecoder<T: Clone + Send + 'static> {
     buf: Vec<u8>,
 }
 
-impl<T: Clone + Send + 'static> SimpleDelimiterDecoder<T> {
+impl<T: Clone + Send + 'static> ByteDelimitedDecoder<T> {
     /// Creates new packet decoder.
     pub fn new<F>(start: u8, end: u8, decode: F) -> Self
     where
@@ -125,17 +125,17 @@ impl<T: Clone + Send + 'static> SimpleDelimiterDecoder<T> {
     }
 }
 
-impl<T: Clone + Send + 'static> BufDecoder<T> for SimpleDelimiterDecoder<T> {
+impl<T: Clone + Send + 'static> BufDecoder<T> for ByteDelimitedDecoder<T> {
     type Error = ();
 
-    fn decode<B: Buf>(&mut self, buf: &mut B) -> DecoderResult<T, Self::Error> {
+    fn decode<B: Buf>(&mut self, buf: &mut B) -> BufDecoderResult<T, Self::Error> {
         if !self.is_decoding {
             self.buf.clear();
             while buf.has_remaining() && buf.chunk()[0] != self.start {
                 buf.advance(1);
             }
             if !buf.has_remaining() {
-                return DecoderResult::Empty;
+                return BufDecoderResult::Empty;
             }
             buf.advance(1);
             self.is_decoding = true;
@@ -144,22 +144,22 @@ impl<T: Clone + Send + 'static> BufDecoder<T> for SimpleDelimiterDecoder<T> {
             self.buf.push(buf.get_u8());
         }
         if !buf.has_remaining() {
-            return DecoderResult::Partial;
+            return BufDecoderResult::Partial;
         }
         self.is_decoding = false;
         if self.buf.is_empty() {
-            return DecoderResult::Ignored;
+            return BufDecoderResult::Ignored;
         }
         if self.start != self.end {
             buf.advance(1);
         }
-        DecoderResult::Decoded((self.decode_callback)(&self.buf))
+        BufDecoderResult::Decoded((self.decode_callback)(&self.buf))
     }
 }
 
-impl<T: Clone + Send + 'static> fmt::Debug for SimpleDelimiterDecoder<T> {
+impl<T: Clone + Send + 'static> fmt::Debug for ByteDelimitedDecoder<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("SimpleDelimiterDecoder")
+        f.debug_struct("ByteDelimitedDecoder")
             .finish_non_exhaustive()
     }
 }

@@ -1,6 +1,6 @@
 //! Example: a simulation that receives data from a serial port.
 //!
-//! To run an example, execute `serial-setup.sh` in another shell first.
+//! Before running an example, execute `serial-setup.sh` in another shell.
 //!
 //! This example demonstrates in particular:
 //!
@@ -15,10 +15,10 @@
 //!                              ┏━━━━━━━━━━━━━━━━━━━━━┓
 //!                              ┃ Simulation          ┃
 //! ┌╌╌╌╌╌╌╌╌╌╌╌╌┐               ┃   ┌──────────┐mode  ┃
-//! ┆ External   ┆    pulses     ┃   │          ├──────╂┐BlockingEventQueue
-//! ┆ thread     ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╂╌╌►│ Counter  │count ┃├───────────────────►
-//! ┆            ┆ [serial port] ┃   │          ├──────╂┘
-//! └╌╌╌╌╌╌╌╌╌╌╌╌┘               ┃   └──────────┘      ┃
+//! ┆ External   ┆    pulses►    ┃   │          ├──────╂┐BlockingEventQueue
+//! ┆ threads    ┆◄╌╌╌╌╌╌╌╌╌╌╌╌╌╌╂╌╌►│ Counter  │count ┃├───────────────────►
+//! ┆            ┆   ◄count      ┃   │          ├──────╂┘
+//! └╌╌╌╌╌╌╌╌╌╌╌╌┘ [serial port] ┃   └──────────┘      ┃
 //!                              ┗━━━━━━━━━━━━━━━━━━━━━┛
 //! ```
 
@@ -28,14 +28,14 @@ use std::time::Duration;
 use schematic::{ConfigLoader, Format};
 
 use nexosim::model::{Context, Model};
-use nexosim::ports::{BlockingEventQueue, Output};
+use nexosim::ports::{EventQueue, Output};
 use nexosim::simulation::{ExecutionError, Mailbox, SimInit, SimulationError};
 use nexosim::time::{AutoSystemClock, MonotonicTime};
 use nexosim_util::joiners::{SimulationJoiner, ThreadJoiner};
 use nexosim_util::observables::ObservableValue;
 
-use nexosim_byte_utils::decoding::{ByteStreamDecoder, SimpleDelimiterDecoder};
-use nexosim_serial_port::{ProtoSerialPort, SerialPortConfig};
+use nexosim_byte_utils::decode::{ByteDelimitedDecoder, ByteStreamDecoder};
+use nexosim_serial_port::{ProtoSerialPort, SerialPort, SerialPortConfig};
 
 /// For serial ports setup see `serial-setup.sh`.
 ///
@@ -48,9 +48,11 @@ const EXTERNAL_PORT_PATH: &str = "/tmp/ttyS21";
 const PERIOD: u64 = 10;
 /// Time shift, in milliseconds, for scheduling events at the present moment.
 const DELTA: u64 = 5;
+/// Reader timeout.
+const TIMEOUT: Duration = Duration::from_secs(5);
 
 const SWITCH_ON_DELAY: Duration = Duration::from_secs(1);
-const N: u64 = 10;
+const N: u8 = 10;
 
 /// Counter mode.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -64,7 +66,7 @@ pub enum Mode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Event {
     Mode(Mode),
-    Count(u64),
+    Count(u8),
 }
 
 /// The `Counter` Model.
@@ -73,13 +75,13 @@ pub struct Counter {
     pub mode: Output<Mode>,
 
     /// Pulses count.
-    pub count: Output<u64>,
+    pub count: Output<u8>,
 
     /// Internal state.
     state: ObservableValue<Mode>,
 
     /// Counter.
-    acc: ObservableValue<u64>,
+    acc: ObservableValue<u8>,
 }
 
 impl Counter {
@@ -135,8 +137,10 @@ fn main() -> Result<(), SimulationError> {
     let mut serial = ProtoSerialPort::new(get_serial_port_cfg(INTERNAL_PORT_PATH));
 
     // The decoder model.
-    // The accepted pulse packet is 0xFFXXAA, where XX is any byte.
-    let mut decoder = ByteStreamDecoder::new(SimpleDelimiterDecoder::<()>::new(0xFF, 0xAA, |_| {}));
+    //
+    // The accepted pulse packet is 0xFFXXAA, where XX is any non-empty sequence
+    // of bytes.
+    let mut decoder = ByteStreamDecoder::new(ByteDelimitedDecoder::<()>::new(0xFF, 0xAA, |_| {}));
 
     // The counter model.
     let mut counter = Counter::new();
@@ -147,22 +151,25 @@ fn main() -> Result<(), SimulationError> {
     let counter_mbox = Mailbox::new();
 
     // Connections.
-    serial.received_data.connect(
-        ByteStreamDecoder::<(), SimpleDelimiterDecoder<()>>::input_bytes,
+    serial.bytes_out.connect(
+        ByteStreamDecoder::<(), ByteDelimitedDecoder<()>>::bytes_in,
         &decoder_mbox,
     );
-    decoder.decoded_data.connect(Counter::pulse, &counter_mbox);
+    decoder.data_out.connect(Counter::pulse, &counter_mbox);
+    counter
+        .count
+        .map_connect(|c| (vec![*c]).into(), SerialPort::bytes_in, &serial_mbox);
 
     // Model handles for simulation.
     let counter_addr = counter_mbox.address();
-    let observer = BlockingEventQueue::new();
+    let observer = EventQueue::new();
     counter
         .mode
         .map_connect_sink(|m| Event::Mode(*m), &observer);
     counter
         .count
         .map_connect_sink(|c| Event::Count(*c), &observer);
-    let mut observer = observer.into_reader();
+    let mut observer = observer.into_reader_with_timeout(TIMEOUT);
 
     // Start time (arbitrary since models do not depend on absolute time).
     let t0 = MonotonicTime::EPOCH;
@@ -204,34 +211,54 @@ fn main() -> Result<(), SimulationError> {
         }
     }
 
-    let mut external_port = serialport::new(EXTERNAL_PORT_PATH, 0).open().unwrap();
+    let mut receiver_port = serialport::new(EXTERNAL_PORT_PATH, 0).open().unwrap();
+    let mut sender_port = receiver_port.try_clone().unwrap();
+
+    // Thread receiving data from the serial port.
+    let receiver_thread = ThreadJoiner::new(thread::spawn(move || {
+        let mut buffer = [0; 10];
+        let mut count = 0;
+        for _ in 0..N {
+            sleep(Duration::from_secs(1));
+            if let Ok(n) = receiver_port.read(&mut buffer) {
+                if n > 0 {
+                    count = buffer[n - 1];
+                    if count >= N {
+                        break;
+                    }
+                }
+            }
+        }
+        count
+    }));
+
     // Thread sending data to the serial port.
     let sender_thread = ThreadJoiner::new(thread::spawn(move || {
         for i in 0..N {
             if i % 5 == 1 {
                 sleep(Duration::from_secs(1));
             }
-            external_port.write_all(&[0xFF]).unwrap();
+            sender_port.write_all(&[0xFF]).unwrap();
             if i % 5 == 2 {
                 sleep(Duration::from_secs(1));
             }
-            external_port.write_all(&[0x55]).unwrap();
+            sender_port.write_all(&[0x55]).unwrap();
             if i % 5 == 3 {
+                sender_port.write_all(&[0xBE]).unwrap();
                 sleep(Duration::from_secs(1));
             }
-            external_port.write_all(&[0xAA]).unwrap();
+            sender_port.write_all(&[0xAA]).unwrap();
         }
     }));
 
     // Wait until `N` detections.
     loop {
         // This call is blocking.
-        let event = observer.next();
-        match event {
+        match observer.next() {
             Some(Event::Count(c)) if c >= N => {
                 break;
             }
-            None => panic!("Simulation exited unexpectedly"),
+            None => panic!("Unexpected timeout or simulation halt!"),
             _ => (),
         }
     }
@@ -243,6 +270,8 @@ fn main() -> Result<(), SimulationError> {
         _ => {}
     }
 
+    assert_eq!(N, receiver_thread.join().unwrap());
+
     sender_thread.join().unwrap();
 
     Ok(())
@@ -252,13 +281,13 @@ fn main() -> Result<(), SimulationError> {
 fn get_serial_port_cfg(path: &str) -> SerialPortConfig {
     let mut loader = ConfigLoader::<SerialPortConfig>::new();
     loader
-        .code(format!("portPath: {}", path), Format::Yaml)
+        .code(format!("portPath = \"{}\"", path), Format::Toml)
         .unwrap();
     loader
-        .code(format!("delta: {}", DELTA), Format::Yaml)
+        .code(format!("delta = {}", DELTA), Format::Toml)
         .unwrap();
     loader
-        .code(format!("period: {}", PERIOD), Format::Yaml)
+        .code(format!("period = {}", PERIOD), Format::Toml)
         .unwrap();
     loader.load().unwrap().config
 }
