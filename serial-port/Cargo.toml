@@ -27,7 +27,7 @@ tracing = ["dep:tracing", "nexosim/tracing"]
 
 [dependencies]
 bytes = { workspace = true }
-schematic = "0.17"
+schematic = "0.18"
 serde = "1"
 mio = { workspace = true }
 mio-serial = "5"
