@@ -38,7 +38,7 @@ tracing = { version = "0.1.40", default-features = false, features = [
 ], optional = true }
 
 [dev-dependencies]
-schematic = { version = "0.17", features = [ "toml" ] }
+schematic = { version = "0.18", features = [ "toml" ] }
 serialport = {version = "4.7", default-features = false}
 nexosim-util = { workspace = true }
 nexosim-byte-utils = { path = "../byte-utils" }
