@@ -8,7 +8,7 @@ name = "nexosim-serial-port"
 # - Update if necessary copyright notice in LICENSE-MIT
 # - Create a "vX.Y.Z" git tag
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description="""
 Serial port model for NeXosim-based simulations.
 """

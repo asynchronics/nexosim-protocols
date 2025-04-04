@@ -1,6 +1,6 @@
 [workspace]
 members = ["byte-utils", "io-utils", "serial-port"]
-resolver = "2"
+resolver = "3"
 
 [workspace.dependencies]
 bytes = "1.10"
