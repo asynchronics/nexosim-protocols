@@ -17,7 +17,7 @@ use std::os::unix::{io::AsRawFd, prelude::RawFd};
 use std::time::Duration;
 
 use mio::event::Source;
-use mio::{Interest, Registry, Token, unix::SourceFd};
+use mio::{unix::SourceFd, Interest, Registry, Token};
 
 use schematic::Config;
 
@@ -34,9 +34,9 @@ use nexosim_io_utils::port::{IoPort, IoThread};
 /// A Socket wrapped for MIO eventing.
 // Taken with changes from socketcan-rs.
 #[derive(Debug)]
-struct EventedSocket<T: Socket>(T);
+struct MioSocket<T: Socket>(T);
 
-impl<T: Socket> EventedSocket<T> {
+impl<T: Socket> MioSocket<T> {
     /// Creates new socket.
     fn new(socket: T) -> Self {
         Self(socket)
@@ -53,13 +53,13 @@ impl<T: Socket> EventedSocket<T> {
     }
 }
 
-impl<T: Socket> AsRawFd for EventedSocket<T> {
+impl<T: Socket> AsRawFd for MioSocket<T> {
     fn as_raw_fd(&self) -> RawFd {
         self.0.as_raw_fd()
     }
 }
 
-impl<T: Socket> Source for EventedSocket<T> {
+impl<T: Socket> Source for MioSocket<T> {
     fn register(&mut self, registry: &Registry, token: Token, interests: Interest) -> Result<()> {
         SourceFd(&self.0.as_raw_fd()).register(registry, token, interests)
     }
@@ -103,7 +103,7 @@ pub struct CanData {
 }
 
 struct CanPortInner {
-    sockets: Vec<EventedSocket<CanSocket>>,
+    sockets: Vec<MioSocket<CanSocket>>,
 }
 
 impl CanPortInner {
@@ -111,7 +111,7 @@ impl CanPortInner {
         let mut sockets = Vec::with_capacity(interfaces.len());
 
         for interface in interfaces.iter() {
-            let socket = EventedSocket::new(CanSocket::open(interface).unwrap());
+            let socket = MioSocket::new(CanSocket::open(interface).unwrap());
             socket.get_ref().set_nonblocking(true).unwrap();
             sockets.push(socket);
         }
@@ -120,7 +120,7 @@ impl CanPortInner {
     }
 }
 
-impl IoPort<EventedSocket<CanSocket>, CanData, CanData> for CanPortInner {
+impl IoPort<MioSocket<CanSocket>, CanData, CanData> for CanPortInner {
     fn register(&mut self, registry: &Registry) -> Token {
         for (i, socket) in self.sockets.iter_mut().enumerate() {
             registry
@@ -132,30 +132,30 @@ impl IoPort<EventedSocket<CanSocket>, CanData, CanData> for CanPortInner {
 
     fn read(&mut self, token: Token) -> Result<CanData> {
         let Token(i) = token;
-        if i < self.sockets.len() {
-            self.sockets[i].get_ref().read_frame().map(|frame| CanData {
-                interface: i,
-                frame,
-            })
-        } else {
-            // Unknown event: should never happen.
-            Err(Error::new(ErrorKind::InvalidInput, "Unknown event."))
-        }
+        self.sockets.get(i).map_or(
+            Err(Error::new(ErrorKind::InvalidInput, "Unknown event.")),
+            |socket| {
+                socket.get_ref().read_frame().map(|frame| CanData {
+                    interface: i,
+                    frame,
+                })
+            },
+        )
     }
 
     fn write(&mut self, data: &CanData) -> Result<()> {
-        if data.interface < self.sockets.len() {
-            self.sockets[data.interface]
-                .get_mut_ref()
-                .transmit(&data.frame)
-                .map_err(|err| match err {
-                    CanError::Io(err) => err,
-                    CanError::Can(err) => Error::new(ErrorKind::Other, err),
-                })
-        } else {
-            // Unknown interface: should never happen.
-            Err(Error::new(ErrorKind::InvalidInput, "Unknown interface."))
-        }
+        self.sockets.get_mut(data.interface).map_or(
+            Err(Error::new(ErrorKind::InvalidInput, "Unknown interface.")),
+            |socket| {
+                socket
+                    .get_mut_ref()
+                    .transmit(&data.frame)
+                    .map_err(|err| match err {
+                        CanError::Io(err) => err,
+                        CanError::Can(err) => Error::new(ErrorKind::Other, err),
+                    })
+            },
+        )
     }
 }
 
