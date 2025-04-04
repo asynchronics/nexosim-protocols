@@ -131,6 +131,7 @@ pub struct SerialPort {
     /// Model instance configuration.
     config: SerialPortConfig,
 
+    /// I/O thread.
     io_thread: IoThread<Bytes, Bytes>,
 }
 
