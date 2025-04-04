@@ -103,11 +103,11 @@
 use std::error::Error;
 use std::fmt;
 use std::io::{ErrorKind, Result as IoResult};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{
-    channel, Receiver, SendError as MpscSendError, Sender, TryRecvError as MpscTryRecvError,
+    Receiver, SendError as MpscSendError, Sender, TryRecvError as MpscTryRecvError, channel,
 };
-use std::sync::Arc;
 use std::thread;
 
 use mio::event::Source;
