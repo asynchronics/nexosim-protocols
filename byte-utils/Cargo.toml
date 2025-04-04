@@ -1,0 +1,28 @@
+[package]
+name = "nexosim-byte-utils"
+# When incrementing version and releasing to crates.io:
+# - Update crate version in this Cargo.toml
+# - Update dependency in sibling crates
+# - Remove path dependencies
+# - Update CHANGELOG.md
+# - Update if necessary copyright notice in LICENSE-MIT
+# - Create a "vX.Y.Z" git tag
+version = "0.1.0"
+edition = "2024"
+description="""
+Byte and stream manipulation utilities for NeXosim-based simulations.
+"""
+categories = ["simulation", "aerospace", "science"]
+keywords = [
+    "simulation",
+    "discrete-event",
+    "systems",
+    "cyberphysical",
+    "real-time",
+    "stream",
+]
+
+[dependencies]
+buf-list = "1"
+bytes = "1.10"
+nexosim = { workspace = true }
