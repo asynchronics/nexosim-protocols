@@ -17,7 +17,7 @@ use std::os::unix::{io::AsRawFd, prelude::RawFd};
 use std::time::Duration;
 
 use mio::event::Source;
-use mio::{unix::SourceFd, Interest, Registry, Token};
+use mio::{Interest, Registry, Token, unix::SourceFd};
 
 use schematic::Config;
 
