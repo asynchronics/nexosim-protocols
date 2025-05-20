@@ -10,9 +10,11 @@ protocol implementation for [NeXosim][NX]-based simulations.
 The API documentation is relatively exhaustive and includes a practical
 overview which should provide all necessary information to get started.
 
-An example of usage can be found in [serial port model][SPM].
+Examples of usage can be found in [`examples`][EX] directory and [serial port
+model examples][SPM].
 
-[SPM]: https://github.com/asynchronics/nexosim-protocols/blob/main/serial-port/src/lib.rs
+[EX]: https://github.com/asynchronics/nexosim-protocols/tree/main/byte-utils/examples
+[SPM]: https://github.com/asynchronics/nexosim-protocols/blob/main/serial-port/examples
 
 See also [NeXosim documentation][NXAPI].
 
@@ -24,7 +26,7 @@ To use the latest version, add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-nexosim-byte-utils = { git = "https://github.com/asynchronics/nexosim-protocols.git" }
+nexosim-byte-utils = "0.1.0"
 ```
 
 ## License

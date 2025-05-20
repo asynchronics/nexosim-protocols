@@ -1,19 +1,21 @@
-# NeXosim serial port model
+# NeXosim CAN port model
 
-This crate contains serial port model for [NeXosim][NX]-based simulations.
+This crate contains CAN port model for [NeXosim][NX]-based simulations.
 
 [NX]: https://github.com/asynchronics/nexosim
 
 ## Model overview
 
 This model
- * listens the specified serial ports injecting data from it into the
-   simulation,
- * outputs data from the simulation to the specified serial port.
+* listens the specified CAN ports injecting data from it into the
+  simulation,
+* outputs data from the simulation to the specified CAN ports.
+
+**Note: data sent by the CAN port is injected back into the simulation.**
 
 ```text
             ┌───────────┐
-  bytes_in  │  Serial   │ bytes_out
+  frame_in  │  CAN      │ frame_out
 ●──────────►│  port     ├───────────►
             │           │
             └───────────┘
@@ -36,7 +38,7 @@ To use the latest version, add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-nexosim-serial-port = "0.1.0"
+nexosim-can-port = "0.1.0"
 ```
 
 ## License

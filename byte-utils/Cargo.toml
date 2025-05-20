@@ -2,11 +2,17 @@
 name = "nexosim-byte-utils"
 # When incrementing version and releasing to crates.io:
 # - Update crate version in this Cargo.toml
+# - Update crate version in README.md
 # - Update dependency in sibling crates
 # - Remove path dependencies
 # - Update CHANGELOG.md
 # - Update if necessary copyright notice in LICENSE-MIT
 # - Create a "vX.Y.Z" git tag
+authors = ["Asynchronics"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/asynchronics/nexosim-protocols"
+readme = "README.md"
+homepage = "https://github.com/asynchronics/nexosim-protocols/byte-utils"
 version = "0.1.0"
 edition = "2024"
 description="""
@@ -24,5 +30,5 @@ keywords = [
 
 [dependencies]
 buf-list = "1"
-bytes = "1.10"
+bytes = { workspace = true }
 nexosim = { workspace = true }

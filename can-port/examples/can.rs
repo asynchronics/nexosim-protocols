@@ -28,12 +28,13 @@ use schematic::{ConfigLoader, Format};
 
 use socketcan::{BlockingCan, CanFrame, CanSocket, EmbeddedFrame, Id, Socket, StandardId};
 
+use thread_guard::ThreadGuard;
+
 use nexosim::model::{Context, Model};
 use nexosim::ports::{EventQueue, Output};
 use nexosim::simulation::{ExecutionError, Mailbox, SimInit, SimulationError};
 use nexosim::time::{AutoSystemClock, MonotonicTime};
-use nexosim_util::joiners::{SimulationJoiner, ThreadJoiner};
-use nexosim_util::observables::ObservableValue;
+use nexosim_util::observable::Observable;
 
 use nexosim_can_port::{CanData, CanPort, CanPortConfig, ProtoCanPort};
 
@@ -47,6 +48,8 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Pulse data ID.
 const PULSE_ID: u16 = 0x100;
+
+/// Detection data ID.
 const STAT_ID: u16 = 0x200;
 
 /// Activation period, in milliseconds, for cyclic activities inside the simulation.
@@ -54,7 +57,10 @@ const PERIOD: u64 = 10;
 /// Time shift, in milliseconds, for scheduling events at the present moment.
 const DELTA: u64 = 5;
 
+/// Counter switch on delay.
 const SWITCH_ON_DELAY: Duration = Duration::from_secs(1);
+
+/// Number of detections.
 const N: u64 = 10;
 
 /// Counter mode.
@@ -81,10 +87,10 @@ pub struct Counter {
     pub count: Output<u64>,
 
     /// Internal state.
-    state: ObservableValue<Mode>,
+    state: Observable<Mode>,
 
     /// Counter.
-    acc: ObservableValue<u64>,
+    acc: Observable<u64>,
 }
 
 impl Counter {
@@ -95,8 +101,8 @@ impl Counter {
         Self {
             mode: mode.clone(),
             count: count.clone(),
-            state: ObservableValue::new(mode),
-            acc: ObservableValue::new(count),
+            state: Observable::new(mode),
+            acc: Observable::new(count),
         }
     }
 
@@ -189,13 +195,21 @@ fn main() -> Result<(), SimulationError> {
         .set_clock(AutoSystemClock::new())
         .init(t0)?;
 
+    let mut sim_scheduler = scheduler.clone();
+
     // Simulation thread.
-    let simulation_handle = SimulationJoiner::new(
-        scheduler.clone(),
+    let simulation_handle = ThreadGuard::with_actions(
         thread::spawn(move || {
             // ---------- Simulation.  ----------
+            // Infinitely kept alive by the ticker model until halted.
             simu.step_unbounded()
         }),
+        move |_| {
+            sim_scheduler.halt();
+        },
+        |_, res| {
+            println!("Simulation thread result: {:?}.", res);
+        },
     );
 
     // Switch the counter on.
@@ -219,7 +233,7 @@ fn main() -> Result<(), SimulationError> {
     }
 
     // Threads sending data to the CAN ports.
-    let sender_thread_0 = ThreadJoiner::new(thread::spawn(move || {
+    let sender_thread_0 = ThreadGuard::new(thread::spawn(move || {
         let mut socket = CanSocket::open(CAN_INTERFACES[0]).unwrap();
         for _ in 0..N / 2 {
             sleep(Duration::from_secs(1));
@@ -231,7 +245,7 @@ fn main() -> Result<(), SimulationError> {
                 .unwrap();
         }
     }));
-    let sender_thread_1 = ThreadJoiner::new(thread::spawn(move || {
+    let sender_thread_1 = ThreadGuard::new(thread::spawn(move || {
         let mut socket = CanSocket::open(CAN_INTERFACES[1]).unwrap();
         for _ in 0..N / 2 {
             socket
@@ -243,9 +257,6 @@ fn main() -> Result<(), SimulationError> {
             sleep(Duration::from_secs(1));
         }
     }));
-    // let receiver_thread = ThreadJoiner::new(thread::spawn(move || {
-    //     let socket = CanSocket::open(CAN_INTERFACES[0]).unwrap();
-    // }));
 
     // Wait until `N` detections.
     loop {
@@ -261,7 +272,7 @@ fn main() -> Result<(), SimulationError> {
     }
 
     // Stop the simulation.
-    match simulation_handle.halt().unwrap() {
+    match simulation_handle.join().unwrap() {
         Err(ExecutionError::Halted) => {}
         Err(e) => return Err(e.into()),
         _ => {}

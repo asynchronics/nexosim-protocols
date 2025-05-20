@@ -2,11 +2,17 @@
 name = "nexosim-serial-port"
 # When incrementing version and releasing to crates.io:
 # - Update crate version in this Cargo.toml
+# - Update crate version in README.md
 # - Update dependency in sibling crates
 # - Remove path dependencies
 # - Update CHANGELOG.md
 # - Update if necessary copyright notice in LICENSE-MIT
 # - Create a "vX.Y.Z" git tag
+authors = ["Asynchronics"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/asynchronics/nexosim-protocols"
+readme = "README.md"
+homepage = "https://github.com/asynchronics/nexosim-protocols/serial-port"
 version = "0.1.0"
 edition = "2024"
 description="""
@@ -38,7 +44,8 @@ tracing = { version = "0.1.40", default-features = false, features = [
 ], optional = true }
 
 [dev-dependencies]
-schematic = { workspace = true, features = [ "toml" ] }
-serialport = {version = "4.7", default-features = false}
 nexosim-util = { workspace = true }
 nexosim-byte-utils = { path = "../byte-utils" }
+schematic = { workspace = true, features = [ "toml" ] }
+serialport = {version = "4.7", default-features = false}
+thread-guard = { workspace = true }

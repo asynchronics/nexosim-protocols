@@ -27,12 +27,13 @@ use std::time::Duration;
 
 use schematic::{ConfigLoader, Format};
 
+use thread_guard::ThreadGuard;
+
 use nexosim::model::{Context, Model};
 use nexosim::ports::{EventQueue, Output};
 use nexosim::simulation::{ExecutionError, Mailbox, SimInit, SimulationError};
 use nexosim::time::{AutoSystemClock, MonotonicTime};
-use nexosim_util::joiners::{SimulationJoiner, ThreadJoiner};
-use nexosim_util::observables::ObservableValue;
+use nexosim_util::observable::Observable;
 
 use nexosim_byte_utils::decode::{ByteDelimitedDecoder, ByteStreamDecoder};
 use nexosim_serial_port::{ProtoSerialPort, SerialPort, SerialPortConfig};
@@ -51,7 +52,10 @@ const DELTA: u64 = 5;
 /// Reader timeout.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Counter switch on delay.
 const SWITCH_ON_DELAY: Duration = Duration::from_secs(1);
+
+/// Number of detections.
 const N: u8 = 10;
 
 /// Counter mode.
@@ -78,10 +82,10 @@ pub struct Counter {
     pub count: Output<u8>,
 
     /// Internal state.
-    state: ObservableValue<Mode>,
+    state: Observable<Mode>,
 
     /// Counter.
-    acc: ObservableValue<u8>,
+    acc: Observable<u8>,
 }
 
 impl Counter {
@@ -92,8 +96,8 @@ impl Counter {
         Self {
             mode: mode.clone(),
             count: count.clone(),
-            state: ObservableValue::new(mode),
-            acc: ObservableValue::new(count),
+            state: Observable::new(mode),
+            acc: Observable::new(count),
         }
     }
 
@@ -182,13 +186,21 @@ fn main() -> Result<(), SimulationError> {
         .set_clock(AutoSystemClock::new())
         .init(t0)?;
 
+    let mut sim_scheduler = scheduler.clone();
+
     // Simulation thread.
-    let simulation_handle = SimulationJoiner::new(
-        scheduler.clone(),
+    let simulation_handle = ThreadGuard::with_actions(
         thread::spawn(move || {
             // ---------- Simulation.  ----------
+            // Infinitely kept alive by the ticker model until halted.
             simu.step_unbounded()
         }),
+        move |_| {
+            sim_scheduler.halt();
+        },
+        |_, res| {
+            println!("Simulation thread result: {:?}.", res);
+        },
     );
 
     // Switch the counter on.
@@ -215,7 +227,7 @@ fn main() -> Result<(), SimulationError> {
     let mut sender_port = receiver_port.try_clone().unwrap();
 
     // Thread receiving data from the serial port.
-    let receiver_thread = ThreadJoiner::new(thread::spawn(move || {
+    let receiver_thread = ThreadGuard::new(thread::spawn(move || {
         let mut buffer = [0; 10];
         let mut count = 0;
         for _ in 0..N {
@@ -233,7 +245,7 @@ fn main() -> Result<(), SimulationError> {
     }));
 
     // Thread sending data to the serial port.
-    let sender_thread = ThreadJoiner::new(thread::spawn(move || {
+    let sender_thread = ThreadGuard::new(thread::spawn(move || {
         for i in 0..N {
             if i % 5 == 1 {
                 sleep(Duration::from_secs(1));
@@ -264,7 +276,7 @@ fn main() -> Result<(), SimulationError> {
     }
 
     // Stop the simulation.
-    match simulation_handle.halt().unwrap() {
+    match simulation_handle.join().unwrap() {
         Err(ExecutionError::Halted) => {}
         Err(e) => return Err(e.into()),
         _ => {}
