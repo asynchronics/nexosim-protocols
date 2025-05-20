@@ -21,6 +21,7 @@
 //! └╌╌╌╌╌╌╌╌╌╌╌╌┘            ┃   └──────────┘      ┃
 //!                           ┗━━━━━━━━━━━━━━━━━━━━━┛
 //! ```
+use std::sync::mpsc::channel;
 use std::thread::{self, sleep};
 use std::time::Duration;
 
@@ -232,8 +233,13 @@ fn main() -> Result<(), SimulationError> {
         }
     }
 
+    // Synchronization channels.
+    let (tx_0, rx_0) = channel();
+    let (tx_1, rx_1) = channel();
+
     // Threads sending data to the CAN ports.
     let sender_thread_0 = ThreadGuard::new(thread::spawn(move || {
+        rx_0.recv().unwrap();
         let mut socket = CanSocket::open(CAN_INTERFACES[0]).unwrap();
         for _ in 0..N / 2 {
             sleep(Duration::from_secs(1));
@@ -246,6 +252,7 @@ fn main() -> Result<(), SimulationError> {
         }
     }));
     let sender_thread_1 = ThreadGuard::new(thread::spawn(move || {
+        rx_1.recv().unwrap();
         let mut socket = CanSocket::open(CAN_INTERFACES[1]).unwrap();
         for _ in 0..N / 2 {
             socket
@@ -256,6 +263,29 @@ fn main() -> Result<(), SimulationError> {
                 .unwrap();
             sleep(Duration::from_secs(1));
         }
+    }));
+
+    // Thread collecting statistics from CAN TM.
+    let receiver_thread = ThreadGuard::new(thread::spawn(move || {
+        let socket = CanSocket::open(CAN_INTERFACES[0]).unwrap();
+        tx_0.send(()).unwrap();
+        tx_1.send(()).unwrap();
+        let mut count = 0;
+        for _ in 0..N * 2 {
+            match socket.read_frame_timeout(Duration::from_secs(2)) {
+                Ok(CanFrame::Data(frame))
+                    if frame.id() == Id::Standard(StandardId::new(STAT_ID).unwrap()) =>
+                {
+                    count =
+                        u64::from_le_bytes(frame.data()[..size_of::<u64>()].try_into().unwrap());
+                    if count >= N {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        count
     }));
 
     // Wait until `N` detections.
@@ -277,6 +307,8 @@ fn main() -> Result<(), SimulationError> {
         Err(e) => return Err(e.into()),
         _ => {}
     }
+
+    assert_eq!(N, receiver_thread.join().unwrap());
 
     sender_thread_0.join().unwrap();
     sender_thread_1.join().unwrap();
