@@ -49,11 +49,26 @@ jobs:
       - name: Start TTY
         run: ./serial-port/examples/serial-setup.sh&
 
+      - name: Setup socketcan
+        run: sudo ./can-port/examples/can-setup.sh
+
       - name: Run cargo test
         run: cargo test --all --all-features
 
       - name: Serial port test
         run: cargo run --example=serial
+
+      - name: CAN port test
+        run: cargo run --example=can
+
+      - name: I/O utils test
+        run: cargo run --example=udp
+
+      - name: Byte util test AA
+        run: cargo run --example=aa
+
+      - name: Byte util test KISS
+        run: cargo run --example=kiss
 
   lints:
     name: Lints

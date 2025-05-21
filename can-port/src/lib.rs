@@ -1,13 +1,4 @@
-//! CAN port model for [NeXosim][NX]-based simulations.
-//!
-//! This model
-//! * listens the specified CAN ports injecting data from it into the
-//!   simulation,
-//! * outputs data from the simulation to the specified CAN ports.
-//!
-//! Note: data sent by the CAN port is injected back into the simulation.
-//!
-//! [NX]: https://github.com/asynchronics/nexosim
+#![doc = include_str!("../README.md")]
 #![warn(missing_docs, missing_debug_implementations, unreachable_pub)]
 #![forbid(unsafe_code)]
 
@@ -152,7 +143,7 @@ impl IoPort<MioSocket<CanSocket>, CanData, CanData> for CanPortInner {
                     .transmit(&data.frame)
                     .map_err(|err| match err {
                         CanError::Io(err) => err,
-                        CanError::Can(err) => Error::new(ErrorKind::Other, err),
+                        CanError::Can(err) => Error::other(err),
                     })
             },
         )

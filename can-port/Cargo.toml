@@ -1,5 +1,18 @@
 [package]
 name = "nexosim-can-port"
+# When incrementing version and releasing to crates.io:
+# - Update crate version in this Cargo.toml
+# - Update crate version in README.md
+# - Update dependency in sibling crates
+# - Remove path dependencies
+# - Update CHANGELOG.md
+# - Update if necessary copyright notice in LICENSE-MIT
+# - Create a "vX.Y.Z" git tag
+authors = ["Asynchronics"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/asynchronics/nexosim-protocols"
+readme = "README.md"
+homepage = "https://github.com/asynchronics/nexosim-protocols/can-port"
 version = "0.1.0"
 edition = "2024"
 description="""
@@ -21,7 +34,6 @@ tracing = ["dep:tracing", "nexosim/tracing"]
 [dependencies]
 mio = { version = "1.0", features = ["os-poll", "os-ext"] }
 nexosim = { workspace = true }
-nexosim-util = { workspace = true }
 nexosim-io-utils = { path = "../io-utils" }
 serde = "1"
 schematic = { workspace = true }
@@ -31,5 +43,7 @@ tracing = { version = "0.1.40", default-features = false, features = [
 ], optional = true }
 
 [dev-dependencies]
+nexosim-util = { workspace = true }
 schematic = { workspace = true, features = [ "toml" ] }
+thread-guard = { workspace = true }
 tracing-subscriber = "0.3"

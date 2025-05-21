@@ -1,11 +1,4 @@
-//! Serial port model for [NeXosim][NX]-based simulations.
-//!
-//! This model
-//! * listens the specified serial ports injecting data from it into the
-//!   simulation,
-//! * outputs data from the simulation to the specified serial port.
-//!
-//! [NX]: https://github.com/asynchronics/nexosim
+#![doc = include_str!("../README.md")]
 #![warn(missing_docs, missing_debug_implementations, unreachable_pub)]
 #![forbid(unsafe_code)]
 
@@ -103,14 +96,11 @@ impl IoPort<SerialStream, Bytes, Bytes> for SerialPortInner {
     fn write(&mut self, data: &Bytes) -> IoResult<()> {
         self.port.write(data).map(|len| {
             if len != data.len() {
-                Err(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!(
-                        "Not all bytes written: had to write {}, but wrote {}.",
-                        data.len(),
-                        len
-                    ),
-                ))
+                Err(std::io::Error::other(format!(
+                    "Not all bytes written: had to write {}, but wrote {}.",
+                    data.len(),
+                    len
+                )))
             } else {
                 Ok(())
             }

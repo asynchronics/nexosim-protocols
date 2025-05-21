@@ -5,6 +5,7 @@ resolver = "3"
 [workspace.dependencies]
 bytes = "1.10"
 mio = {version = "1", features = ["os-poll", "os-ext"] }
-nexosim = { git = "https://github.com/asynchronics/nexosim.git", rev = "ba3fd65" }
-nexosim-util = { git = "https://github.com/asynchronics/nexosim.git", rev = "ba3fd65" }
+nexosim = { git = "https://github.com/asynchronics/nexosim.git", rev = "361c54e" }
+nexosim-util = { git = "https://github.com/asynchronics/nexosim.git", rev = "361c54e" }
 schematic = "0.18"
+thread-guard = "0.1.0"

@@ -1,37 +1,38 @@
-# NeXosim serial port model
+# NeXosim CAN port model
 
-This crate contains serial port model for [NeXosim][NX]-based simulations.
+This crate contains CAN port model for [NeXosim][NX]-based simulations.
 
 [NX]: https://github.com/asynchronics/nexosim
 
 ## Model overview
 
 This model
- * listens the specified serial ports injecting data from it into the
-   simulation,
- * outputs data from the simulation to the specified serial port.
+* listens the specified CAN ports injecting data from it into the
+  simulation,
+* outputs data from the simulation to the specified CAN ports.
+
+**Note: data sent by the CAN port is injected back into the simulation.**
 
 ## Ports
 
 ```text
             ┌───────────┐
-  bytes_in  │  Serial   │ bytes_out
+  frame_in  │  CAN      │ frame_out
 ●──────────►│  port     ├───────────►
             │           │
             └───────────┘
 ```
-
 ### Input ports
 
-| Name                | Event type   | Description                            |
-|---------------------|--------------|----------------------------------------|
-| `bytes_in`          | `Bytes`      | Bytes to be written to the serial port |
+| Name                | Event type   | Description                             |
+|---------------------|--------------|-----------------------------------------|
+| `frame_in`          | `CanData`    | CAN frame to be written to the CAN port |
 
 ### Ouput ports
 
-| Name                | Ouput type         | Description                     |
-|---------------------|--------------------|---------------------------------|
-| `bytes_out`         | `Bytes`            | Bytes read from the serial port |
+| Name                | Ouput type         | Description                      |
+|---------------------|--------------------|----------------------------------|
+| `frame_out`         | `Bytes`            | CAN frame read from the CAN port |
 
 ## Documentation
 
@@ -50,12 +51,12 @@ To use the latest version, add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-nexosim-serial-port = "0.1.0"
+nexosim-can-port = "0.1.0"
 ```
 
 ## Configuration
 
-The `SerialPort` model is configurable using the [`schematic`][schematic] crate.
+The `CanPort` model is configurable using the [`schematic`][schematic] crate.
 
 [schematic]: https://moonrepo.github.io/schematic/
 
@@ -64,10 +65,10 @@ An example of instantiation of a new model follows:
 ```rust
 use schematic::{ConfigLoader, Format};
 
-use nexosim_serial_port::{ProtoSerialPort, SerialPort, SerialPortConfig};
+use nexosim_can_port::{ProtoCanPort, CanPort, CanPortConfig};
 
-/// Serial port path.
-const PORT_PATH: &str = "/tmp/ttyS21";
+/// CAN interfaces.
+const CAN_INTERFACES: &[&str] = &["vcan0", "vcan1"];
 
 /// Activation period, in milliseconds, for cyclic activities inside the simulation.
 const PERIOD: u64 = 10;
@@ -75,9 +76,9 @@ const PERIOD: u64 = 10;
 /// Time shift, in milliseconds, for scheduling events at the present moment.
 const DELTA: u64 = 5;
 
-let mut loader = ConfigLoader::<SerialPortConfig>::new();
+let mut loader = ConfigLoader::<CanPortConfig>::new();
 loader
-    .code(format!("portPath = \"{}\"", PORT_PATH), Format::Toml)
+    .code(format!("interfaces = {:?}", CAN_INTERFACES), Format::Toml)
     .unwrap();
 loader
     .code(format!("delta = {}", DELTA), Format::Toml)
@@ -87,7 +88,7 @@ loader
     .unwrap();
 let cfg = loader.load().unwrap().config;
 
-let serial = ProtoSerialPort::new(cfg);
+let serial = ProtoCanPort::new(cfg);
 ```
 
 ## License
