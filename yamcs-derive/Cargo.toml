@@ -1,5 +1,5 @@
 [package]
-name = "nexosim-can-port"
+name = "nexosim-yamcs-derive"
 # When incrementing version and releasing to crates.io:
 # - Update crate version in this Cargo.toml
 # - Update crate version in README.md
@@ -12,11 +12,11 @@ authors = ["Asynchronics"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/asynchronics/nexosim-protocols"
 readme = "README.md"
-homepage = "https://github.com/asynchronics/nexosim-protocols/can-port"
+homepage = "https://github.com/asynchronics/nexosim-protocols/yamcs-derive"
 version = "0.1.0"
 edition = "2024"
 description="""
-CAN port model for NeXosim-based simulations.
+Yamcs bridge types macros for NeXosim-based simulations.
 """
 categories = ["simulation", "aerospace", "science"]
 keywords = [
@@ -28,22 +28,10 @@ keywords = [
     "serial-port",
 ]
 
-[features]
-tracing = ["dep:tracing", "nexosim/tracing"]
+[lib]
+proc-macro = true
 
 [dependencies]
-mio = { version = "1.0", features = ["os-poll", "os-ext"] }
-nexosim = { workspace = true }
-nexosim-io-utils = { path = "../io-utils" }
-serde = { workspace = true }
-schematic = { workspace = true }
-socketcan = { version = "3.3" }
-tracing = { version = "0.1.40", default-features = false, features = [
-    "std",
-], optional = true }
-
-[dev-dependencies]
-nexosim-util = { workspace = true }
-schematic = { workspace = true, features = [ "toml" ] }
-thread-guard = { workspace = true }
-tracing-subscriber = "0.3"
+quote = "1"
+proc-macro2 = "1.0"
+syn = "2.0"
