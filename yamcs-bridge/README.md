@@ -197,7 +197,9 @@ This bench could be implemented as follows:
 ```rust
 use schematic::{ConfigLoader, Format};
 
-use nexosim::model::Model;
+use serde::{Deserialize, Serialize};
+
+use nexosim::Model;
 use nexosim::ports::Output;
 use nexosim::simulation::Mailbox;
 
@@ -211,17 +213,16 @@ struct MyParam {
 }
 
 # #[cfg(feature = "derive")]
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct MyModel {
     pub param_out: Output<MyParam>,
     // ...
 }
 # #[cfg(feature = "derive")]
+#[Model]
 impl MyModel {
     // ...
 }
-# #[cfg(feature = "derive")]
-impl Model for MyModel {}
 
 // Load default configuration:
 // - server at port 7897,
@@ -326,18 +327,21 @@ This bench could be implemented as follows:
 ```rust
 use schematic::{ConfigLoader, Format};
 
-use nexosim::model::Model;
+use serde::{Deserialize, Serialize};
+
+use nexosim::Model;
 use nexosim::ports::Output;
 use nexosim::simulation::Mailbox;
 use nexosim::time::MonotonicTime;
 
 use nexosim_yamcs_bridge::{ProtoYamcsBridge, YamcsBridge, YamcsConfig};
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct MyModel {
     pub param_out: Output<f64>,
     // ...
 }
+#[Model]
 impl MyModel {
     // Validate and execute a parameter update request from Yamcs.
     pub async fn param_in(&mut self, param: f64) -> f64 {
@@ -350,8 +354,6 @@ impl MyModel {
         param
     }
 }
-impl Model for MyModel {}
-
 
 let cfg = ConfigLoader::<YamcsConfig>::new().load().unwrap().config;
 

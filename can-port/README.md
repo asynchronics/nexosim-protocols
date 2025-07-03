@@ -32,7 +32,7 @@ This model
 
 | Name                | Ouput type         | Description                      |
 |---------------------|--------------------|----------------------------------|
-| `frame_out`         | `Bytes`            | CAN frame read from the CAN port |
+| `frame_out`         | `CanData`          | CAN frame read from the CAN port |
 
 ## Documentation
 
@@ -88,7 +88,7 @@ loader
     .unwrap();
 let cfg = loader.load().unwrap().config;
 
-let serial = ProtoCanPort::new(cfg);
+let can = ProtoCanPort::new(cfg);
 ```
 
 ## License

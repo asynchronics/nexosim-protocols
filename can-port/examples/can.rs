@@ -27,14 +27,17 @@ use std::time::Duration;
 
 use schematic::{ConfigLoader, Format};
 
+use serde::{Deserialize, Serialize};
+
 use socketcan::{BlockingCan, CanFrame, CanSocket, EmbeddedFrame, Id, Socket, StandardId};
 
 use thread_guard::ThreadGuard;
 
-use nexosim::model::{Context, Model};
+use nexosim::model::Context;
 use nexosim::ports::{EventQueue, Output};
 use nexosim::simulation::{ExecutionError, Mailbox, SimInit, SimulationError};
 use nexosim::time::{AutoSystemClock, MonotonicTime};
+use nexosim::{Model, schedulable};
 use nexosim_util::observable::Observable;
 
 use nexosim_can_port::{CanData, CanPort, CanPortConfig, ProtoCanPort};
@@ -65,7 +68,7 @@ const SWITCH_ON_DELAY: Duration = Duration::from_secs(1);
 const N: u64 = 10;
 
 /// Counter mode.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Mode {
     #[default]
     Off,
@@ -80,6 +83,7 @@ pub enum Event {
 }
 
 /// The `Counter` Model.
+#[derive(Serialize, Deserialize)]
 pub struct Counter {
     /// Operation mode.
     pub mode: Output<Mode>,
@@ -94,6 +98,7 @@ pub struct Counter {
     acc: Observable<u64>,
 }
 
+#[Model]
 impl Counter {
     /// Creates a new `Counter` model.
     fn new() -> Self {
@@ -102,8 +107,8 @@ impl Counter {
         Self {
             mode: mode.clone(),
             count: count.clone(),
-            state: Observable::new(mode),
-            acc: Observable::new(count),
+            state: Observable::with_default(mode),
+            acc: Observable::with_default(count),
         }
     }
 
@@ -111,7 +116,7 @@ impl Counter {
     pub async fn power_in(&mut self, on: bool, cx: &mut Context<Self>) {
         match *self.state {
             Mode::Off if on => cx
-                .schedule_event(SWITCH_ON_DELAY, Self::switch_on, ())
+                .schedule_event(SWITCH_ON_DELAY, schedulable!(Self::switch_on), ())
                 .unwrap(),
             Mode::On if !on => self.switch_off().await,
             _ => (),
@@ -124,6 +129,7 @@ impl Counter {
     }
 
     /// Switches `Counter` on.
+    #[nexosim(schedulable)]
     async fn switch_on(&mut self) {
         self.state.set(Mode::On).await;
     }
@@ -134,8 +140,6 @@ impl Counter {
     }
 }
 
-impl Model for Counter {}
-
 fn main() -> Result<(), SimulationError> {
     // ---------------
     // Bench assembly.
@@ -143,7 +147,7 @@ fn main() -> Result<(), SimulationError> {
 
     // Models.
 
-    // The serial port model.
+    // The CAN port model.
     let mut can = ProtoCanPort::new(get_can_port_cfg(CAN_INTERFACES));
 
     // The counter model.
@@ -190,12 +194,15 @@ fn main() -> Result<(), SimulationError> {
     let t0 = MonotonicTime::EPOCH;
 
     // Assembly and initialization.
-    let (mut simu, scheduler) = SimInit::new()
-        .add_model(can, can_mbox, "can")
-        .add_model(counter, counter_mbox, "counter")
-        .set_clock(AutoSystemClock::new())
-        .init(t0)?;
+    let mut bench =
+        SimInit::new()
+            .add_model(can, can_mbox, "can")
+            .add_model(counter, counter_mbox, "counter");
 
+    let counter_id = bench.register_input(Counter::power_in, &counter_addr);
+
+    let mut simu = bench.set_clock(AutoSystemClock::new()).init(t0)?;
+    let scheduler = simu.scheduler();
     let mut sim_scheduler = scheduler.clone();
 
     // Simulation thread.
@@ -214,12 +221,7 @@ fn main() -> Result<(), SimulationError> {
     );
 
     // Switch the counter on.
-    scheduler.schedule_event(
-        Duration::from_millis(1),
-        Counter::power_in,
-        true,
-        counter_addr,
-    )?;
+    scheduler.schedule_event(Duration::from_millis(1), &counter_id, true)?;
 
     // Wait until counter mode is `On`.
     loop {
@@ -316,7 +318,7 @@ fn main() -> Result<(), SimulationError> {
     Ok(())
 }
 
-/// Gets serial port configuration.
+/// Gets CAN port configuration.
 fn get_can_port_cfg(interfaces: &[&str]) -> CanPortConfig {
     let mut loader = ConfigLoader::<CanPortConfig>::new();
     loader

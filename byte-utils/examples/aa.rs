@@ -2,7 +2,7 @@
 //!
 //! This example demonstrates in particular:
 //!
-//! * `ByteStreamDecoder` model usage,
+//! * `ByteDecoderModel` model usage,
 //! * `BufDecoder` implementation.
 //!
 //! ```text
@@ -15,18 +15,24 @@
 
 use bytes::Buf;
 
+use serde::{Deserialize, Serialize};
+
 use nexosim::ports::EventQueue;
 use nexosim::simulation::{Mailbox, SimInit, SimulationError};
 use nexosim::time::MonotonicTime;
 
-use nexosim_byte_utils::decode::{BufDecoder, BufDecoderResult, ByteStreamDecoder};
+use nexosim_byte_utils::decode::{
+    BufDecoder, BufDecoderResult, ByteDecoderModel, ProtoByteDecoder,
+};
 
 /// Simple pulse decoder.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct AaDecoder {}
 
 impl BufDecoder<()> for AaDecoder {
-    fn decode<B: Buf>(&mut self, buf: &mut B) -> BufDecoderResult<()> {
+    type DecoderEnv = ();
+
+    fn decode<B: Buf>(&mut self, buf: &mut B, _: &()) -> BufDecoderResult<()> {
         while buf.has_remaining() {
             if buf.get_u8() == 0xAA {
                 return BufDecoderResult::Decoded(());
@@ -36,8 +42,11 @@ impl BufDecoder<()> for AaDecoder {
     }
 }
 
+/// Decoder model prototype.
+pub type ProtoDecoder = ProtoByteDecoder<(), AaDecoder>;
+
 /// Decoder model.
-pub type Decoder = ByteStreamDecoder<(), AaDecoder>;
+pub type Decoder = ByteDecoderModel<(), AaDecoder>;
 
 fn main() -> Result<(), SimulationError> {
     // ---------------
@@ -46,7 +55,7 @@ fn main() -> Result<(), SimulationError> {
 
     // Models.
 
-    let mut decoder = Decoder::default();
+    let mut decoder = ProtoDecoder::default();
 
     // Mailboxes.
     let decoder_mbox = Mailbox::new();
@@ -63,8 +72,7 @@ fn main() -> Result<(), SimulationError> {
     // Assembly and initialization.
     let mut simu = SimInit::new()
         .add_model(decoder, decoder_mbox, "decoder")
-        .init(t0)?
-        .0;
+        .init(t0)?;
 
     // ----------
     // Simulation.

@@ -48,7 +48,10 @@ use std::time::Duration;
 
 use schematic::{ConfigLoader, Format};
 
-use nexosim::model::{Context, InitializedModel, Model};
+use serde::{Deserialize, Serialize};
+
+use nexosim::Model;
+use nexosim::model::{Context, InitializedModel};
 use nexosim::ports::Output;
 use nexosim::simulation::{Mailbox, SimInit, SimulationError};
 use nexosim::time::{AutoSystemClock, MonotonicTime};
@@ -61,6 +64,7 @@ use nexosim_yamcs_bridge::{ProtoYamcsBridge, YamcsBridge, YamcsConfig};
 /// Two inputs allow the simulator to increment `a` and `b`, respectively, while
 /// a replier port allows Yamcs to request a modification of `b` and send back
 /// the value that was actually set (which may differ from the requested value).
+#[derive(Serialize, Deserialize)]
 struct ExampleModel {
     pub param_a_out: Output<i32>,
     pub param_b_out: Output<f64>,
@@ -69,7 +73,17 @@ struct ExampleModel {
     param_b: f64,
 }
 
+#[Model]
 impl ExampleModel {
+    /// Initializes example model.
+    #[nexosim(init)]
+    async fn init(mut self, _: &mut Context<Self>) -> InitializedModel<Self> {
+        self.param_a_out.send(self.param_a).await;
+        self.param_b_out.send(self.param_b).await;
+
+        self.into()
+    }
+
     /// Constructs a new model with both parameters set to zero.
     pub fn new(a: i32, b: f64) -> Self {
         Self {
@@ -107,14 +121,6 @@ impl ExampleModel {
 
         // Send back the value that was actually set.
         self.param_b
-    }
-}
-impl Model for ExampleModel {
-    async fn init(mut self, _: &mut Context<Self>) -> InitializedModel<Self> {
-        self.param_a_out.send(self.param_a).await;
-        self.param_b_out.send(self.param_b).await;
-
-        self.into()
     }
 }
 
@@ -227,47 +233,51 @@ fn main() -> Result<(), SimulationError> {
     // Create the simulation, using a real-time clock.
     //
     // The simulator clock is arbitrarily set to the 1970 TAI epoch.
-    let (mut sim, scheduler) = SimInit::new()
+    let mut bench = SimInit::new()
         .set_clock(AutoSystemClock::new())
-        .add_model(yamcs.build(), yamcs_mbox, "Yamcs model")
+        .add_model(yamcs, yamcs_mbox, "Yamcs model")
         .add_model(model1, model1_mbox, "Model 1")
-        .add_model(model2, model2_mbox, "Model 1")
-        .init(MonotonicTime::EPOCH)?;
+        .add_model(model2, model2_mbox, "Model 1");
+
+    let inc_1_a_id = bench.register_input(ExampleModel::increment_a, &model1_address);
+    let inc_2_a_id = bench.register_input(ExampleModel::increment_a, &model2_address);
+    let inc_1_b_id = bench.register_input(ExampleModel::increment_b, &model1_address);
+    let inc_2_b_id = bench.register_input(ExampleModel::increment_b, &model2_address);
+
+    let mut sim = bench.init(MonotonicTime::EPOCH)?;
+
+    let scheduler = sim.scheduler();
 
     // Increment `model1::a` every 1s.
     scheduler.schedule_periodic_event(
         Duration::from_secs(1),
         Duration::from_secs(1),
-        ExampleModel::increment_a,
+        &inc_1_a_id,
         1,
-        model1_address.clone(),
     )?;
 
     // Increment `model2::a` every 2s.
     scheduler.schedule_periodic_event(
         Duration::from_secs(2),
         Duration::from_secs(2),
-        ExampleModel::increment_a,
+        &inc_2_a_id,
         1,
-        model2_address.clone(),
     )?;
 
     // Increment `model1::b` every 5s.
     scheduler.schedule_periodic_event(
         Duration::from_secs(5),
         Duration::from_secs(5),
-        ExampleModel::increment_b,
+        &inc_1_b_id,
         1.0,
-        model1_address.clone(),
     )?;
 
     // Increment `model2::b` every 10s.
     scheduler.schedule_periodic_event(
         Duration::from_secs(10),
         Duration::from_secs(10),
-        ExampleModel::increment_b,
+        &inc_2_b_id,
         1.0,
-        model2_address.clone(),
     )?;
 
     // Run the simulation for 5 min.

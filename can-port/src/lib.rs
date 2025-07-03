@@ -12,13 +12,16 @@ use mio::{Interest, Registry, Token, unix::SourceFd};
 
 use schematic::Config;
 
+use serde::{Deserialize, Serialize};
+
 use socketcan::{BlockingCan, CanFrame, CanSocket, Error as CanError, Socket};
 
 #[cfg(feature = "tracing")]
 use tracing::info;
 
-use nexosim::model::{BuildContext, Context, InitializedModel, Model, ProtoModel};
+use nexosim::model::{self, BuildContext, Context, InitializedModel, ProtoModel};
 use nexosim::ports::Output;
+use nexosim::{Model, schedulable};
 
 use nexosim_io_utils::port::{IoPort, IoThread};
 
@@ -93,6 +96,7 @@ pub struct CanData {
     pub frame: CanFrame,
 }
 
+/// Inner implementation of I/O port.
 struct CanPortInner {
     sockets: Vec<MioSocket<CanSocket>>,
 }
@@ -150,16 +154,8 @@ impl IoPort<MioSocket<CanSocket>, CanData, CanData> for CanPortInner {
     }
 }
 
-/// CAN port model.
-///
-/// This model
-/// * listens the specified CAN ports and injects into the simulation values
-///   read from it as CAN frames,
-/// * outputs CAN frames from the simulation to the CAN port.
-pub struct CanPort {
-    /// CAN frame -- output port.
-    pub frame_out: Output<CanData>,
-
+/// CAN port model environment.
+pub struct CanPortEnv {
     /// Model instance configuration.
     config: CanPortConfig,
 
@@ -167,68 +163,9 @@ pub struct CanPort {
     io_thread: IoThread<CanData, CanData>,
 }
 
-impl CanPort {
-    /// Creates a new CAN port model.
-    fn new(
-        frame_out: Output<CanData>,
-        config: CanPortConfig,
-        io_thread: IoThread<CanData, CanData>,
-    ) -> Self {
-        Self {
-            frame_out,
-            config,
-            io_thread,
-        }
-    }
-
-    /// Transmits CAN frame -- input port.
-    pub fn frame_in(&mut self, data: CanData) {
-        #[cfg(feature = "tracing")]
-        info!(
-            "Will transmit CAN frame to the CAN interface {}: {:?}.",
-            self.config.interfaces[data.interface], data.frame
-        );
-        self.io_thread.send(data).unwrap();
-    }
-
-    /// Forwards the CAN frame received on the serial port.
-    pub async fn process(&mut self) {
-        while let Ok(data) = self.io_thread.try_recv() {
-            #[cfg(feature = "tracing")]
-            info!(
-                "Received CAN frame on the CAN interface {}: {:?}.",
-                self.config.interfaces[data.interface], data.frame
-            );
-            self.frame_out.send(data).await;
-        }
-    }
-}
-
-impl Model for CanPort {
-    async fn init(self, context: &mut Context<Self>) -> InitializedModel<Self> {
-        if let Some(period) = self.config.period {
-            let delta = match self.config.delta {
-                Some(delta) => delta,
-                None => period,
-            };
-
-            context
-                .schedule_periodic_event(
-                    Duration::from_millis(delta),
-                    Duration::from_millis(period),
-                    Self::process,
-                    (),
-                )
-                .unwrap();
-        }
-
-        self.into()
-    }
-}
-
-impl fmt::Debug for CanPort {
+impl fmt::Debug for CanPortEnv {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("CanPort").finish_non_exhaustive()
+        f.debug_struct("CanPortEnv").finish_non_exhaustive()
     }
 }
 
@@ -255,15 +192,93 @@ impl ProtoCanPort {
 impl ProtoModel for ProtoCanPort {
     type Model = CanPort;
 
-    fn build(self, _: &mut BuildContext<Self>) -> Self::Model {
+    fn build(
+        self,
+        _: &mut BuildContext<Self>,
+    ) -> (Self::Model, <Self::Model as model::Model>::Env) {
         let interfaces = CanPortInner::new(&self.config.interfaces);
 
-        Self::Model::new(self.frame_out, self.config, IoThread::new(interfaces))
+        (
+            Self::Model {
+                frame_out: self.frame_out,
+            },
+            CanPortEnv {
+                config: self.config,
+                io_thread: IoThread::new(interfaces),
+            },
+        )
     }
 }
 
 impl fmt::Debug for ProtoCanPort {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("ProtoCanPort").finish_non_exhaustive()
+    }
+}
+
+/// CAN port model.
+///
+/// This model
+/// * listens the specified CAN ports and injects into the simulation values
+///   read from it as CAN frames,
+/// * outputs CAN frames from the simulation to the CAN port.
+#[derive(Serialize, Deserialize)]
+pub struct CanPort {
+    /// CAN frame -- output port.
+    pub frame_out: Output<CanData>,
+}
+
+#[Model(type Env = CanPortEnv)]
+impl CanPort {
+    /// Initializes CAN port model.
+    #[nexosim(init)]
+    async fn init(self, cx: &mut Context<Self>) -> InitializedModel<Self> {
+        if let Some(period) = cx.env().config.period {
+            let delta = match cx.env().config.delta {
+                Some(delta) => delta,
+                None => period,
+            };
+
+            cx.schedule_periodic_event(
+                Duration::from_millis(delta),
+                Duration::from_millis(period),
+                schedulable!(Self::update),
+                (),
+            )
+            .unwrap();
+        }
+
+        self.into()
+    }
+
+    /// Transmits CAN frame -- input port.
+    pub fn frame_in(&mut self, data: CanData, cx: &mut Context<Self>) {
+        #[cfg(feature = "tracing")]
+        info!(
+            "Will transmit CAN frame to the CAN interface {}: {:?}.",
+            cx.env().config.interfaces[data.interface],
+            data.frame
+        );
+        cx.env().io_thread.send(data).unwrap();
+    }
+
+    /// Forwards the CAN frame received on the serial port.
+    #[nexosim(schedulable)]
+    pub async fn update(&mut self, _: (), cx: &mut Context<Self>) {
+        while let Ok(data) = cx.env().io_thread.try_recv() {
+            #[cfg(feature = "tracing")]
+            info!(
+                "Received CAN frame on the CAN interface {}: {:?}.",
+                cx.env().config.interfaces[data.interface],
+                data.frame
+            );
+            self.frame_out.send(data).await;
+        }
+    }
+}
+
+impl fmt::Debug for CanPort {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("CanPort").finish_non_exhaustive()
     }
 }
