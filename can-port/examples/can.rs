@@ -209,7 +209,7 @@ fn main() -> Result<(), SimulationError> {
             sim_scheduler.halt();
         },
         |_, res| {
-            println!("Simulation thread result: {:?}.", res);
+            println!("Simulation thread result: {res:?}.");
         },
     );
 
@@ -320,13 +320,13 @@ fn main() -> Result<(), SimulationError> {
 fn get_can_port_cfg(interfaces: &[&str]) -> CanPortConfig {
     let mut loader = ConfigLoader::<CanPortConfig>::new();
     loader
-        .code(format!("interfaces = {:?}", interfaces), Format::Toml)
+        .code(format!("interfaces = {interfaces:?}"), Format::Toml)
         .unwrap();
     loader
-        .code(format!("delta = {}", DELTA), Format::Toml)
+        .code(format!("delta = {DELTA}"), Format::Toml)
         .unwrap();
     loader
-        .code(format!("period = {}", PERIOD), Format::Toml)
+        .code(format!("period = {PERIOD}"), Format::Toml)
         .unwrap();
     loader.load().unwrap().config
 }

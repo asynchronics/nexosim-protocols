@@ -488,27 +488,26 @@ fn deserialize_parameter_updates(mut buf: BytesMut) -> Result<Vec<ygw::Parameter
     let version = buf.get_u8();
     if version != YGW_VERSION {
         return Err(format!(
-            "invalid message version: expected {}, got {})",
-            YGW_VERSION, version,
+            "invalid message version: expected {YGW_VERSION}, got {version})",
         ));
     }
 
     // Return an error if this is not a list of parameter updates.
     let msg_type = buf.get_u8() as i32;
     if msg_type != ygw::MessageType::ParameterUpdates as i32 {
-        return Err(format!("unexpected message type: {}", msg_type));
+        return Err(format!("unexpected message type: {msg_type}"));
     }
 
     // Returns an error if the node ID is invalid.
     let node_id = buf.get_u32();
     if node_id != YGW_SIMULATOR_NODE_ID && node_id != u32::MAX {
-        return Err(format!("unexpected node ID: {}", node_id));
+        return Err(format!("unexpected node ID: {node_id}"));
     }
 
     // Returns an error if the link ID is non-null.
     let link_id = buf.get_u32();
     if link_id != 0 {
-        return Err(format!("unexpected link ID: {}", link_id));
+        return Err(format!("unexpected link ID: {link_id}"));
     }
 
     match ygw::ParameterUpdates::decode(buf) {

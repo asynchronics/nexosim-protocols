@@ -44,7 +44,7 @@ fn derive_struct_unnamed(ident: Ident, fields_num: usize) -> TokenStream {
     let mut fields = Vec::with_capacity(fields_num);
 
     for i in 0..fields_num {
-        fields.push(Ident::new(format!("_{}", i).as_str(), Span::call_site()));
+        fields.push(Ident::new(format!("_{i}").as_str(), Span::call_site()));
     }
 
     quote!(
