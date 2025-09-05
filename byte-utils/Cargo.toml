@@ -13,7 +13,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/asynchronics/nexosim-protocols"
 readme = "README.md"
 homepage = "https://github.com/asynchronics/nexosim-protocols/byte-utils"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
 description="""
 Byte and stream manipulation utilities for NeXosim-based simulations.
@@ -23,7 +23,6 @@ keywords = [
     "simulation",
     "discrete-event",
     "systems",
-    "cyberphysical",
     "real-time",
     "stream",
 ]
