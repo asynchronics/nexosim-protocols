@@ -6,7 +6,7 @@ resolver = "3"
 bytes = "1.10"
 mio = {version = "1", features = ["os-poll", "os-ext"] }
 nexosim = "0.4.0-alpha.1"
-nexosim-util = { git = "https://github.com/asynchronics/nexosim.git", rev = "0d0864" }
+nexosim-util = "0.2.0-alpha.1"
 schematic = "0.18"
 serde = "1"
 thread-guard = "0.1.0"
