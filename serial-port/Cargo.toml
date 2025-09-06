@@ -27,6 +27,7 @@ keywords = [
     "real-time",
     "serial-port",
 ]
+publish = ["nexosim"]
 
 [features]
 tracing = ["dep:tracing", "nexosim/tracing"]

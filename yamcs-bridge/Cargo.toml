@@ -15,6 +15,7 @@ readme = "README.md"
 homepage = "https://github.com/asynchronics/nexosim-protocols/yamcs-bridge"
 version = "0.1.0"
 edition = "2024"
+publish = ["nexosim"]
 
 [features]
 derive = ["dep:nexosim-yamcs-derive"]
