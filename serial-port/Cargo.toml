@@ -21,6 +21,7 @@ keywords = [
     "serial-port",
 ]
 license = "MIT OR Apache-2.0"
+publish = ["nexosim"]
 
 [features]
 tracing = ["dep:tracing", "nexosim/tracing"]
@@ -32,7 +33,7 @@ serde = "1"
 mio = { workspace = true }
 mio-serial = "5"
 nexosim = { workspace = true }
-nexosim-io-utils = { path = "../io-utils"}
+nexosim-io-utils = "0.0.0-alpha.1"
 tracing = { version = "0.1.40", default-features = false, features = [
     "std",
 ], optional = true }
@@ -42,4 +43,4 @@ schematic = { workspace = true, features = [ "toml" ] }
 serialport = {version = "4.7", default-features = false}
 thread-guard = "0.1.0"
 nexosim-util = { workspace = true }
-nexosim-byte-utils = { path = "../byte-utils" }
+nexosim-byte-utils = "0.0.0-alpha.1"
