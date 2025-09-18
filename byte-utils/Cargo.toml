@@ -7,7 +7,7 @@ name = "nexosim-byte-utils"
 # - Update CHANGELOG.md
 # - Update if necessary copyright notice in LICENSE-MIT
 # - Create a "vX.Y.Z" git tag
-version = "0.1.0"
+version = "0.0.0-alpha.1"
 edition = "2024"
 description="""
 Byte and stream manipulation utilities for NeXosim-based simulations.
@@ -17,10 +17,10 @@ keywords = [
     "simulation",
     "discrete-event",
     "systems",
-    "cyberphysical",
     "real-time",
     "stream",
 ]
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 buf-list = "1"

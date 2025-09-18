@@ -103,14 +103,11 @@ impl IoPort<SerialStream, Bytes, Bytes> for SerialPortInner {
     fn write(&mut self, data: &Bytes) -> IoResult<()> {
         self.port.write(data).map(|len| {
             if len != data.len() {
-                Err(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!(
-                        "Not all bytes written: had to write {}, but wrote {}.",
-                        data.len(),
-                        len
-                    ),
-                ))
+                Err(std::io::Error::other(format!(
+                    "Not all bytes written: had to write {}, but wrote {}.",
+                    data.len(),
+                    len
+                )))
             } else {
                 Ok(())
             }

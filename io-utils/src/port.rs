@@ -112,8 +112,7 @@ use std::thread;
 
 use mio::event::Source;
 use mio::{Events, Poll, Registry, Token, Waker};
-
-use nexosim_util::joiners::ThreadJoiner;
+use thread_guard::ThreadGuard;
 
 /// I/O port(s) usable by MIO.
 pub trait IoPort<S, R, T>
@@ -212,7 +211,7 @@ where
 {
     /// I/O thread handle.
     // This field must precede waker in order for drop to work properly.
-    _io_thread: ThreadJoiner<()>,
+    _io_thread: ThreadGuard<()>,
 
     /// Data receiver.
     receiver: Receiver<R>,
@@ -285,7 +284,7 @@ where
             }
         });
         Self {
-            _io_thread: ThreadJoiner::new(io_thread),
+            _io_thread: ThreadGuard::new(io_thread),
             receiver,
             transmitter,
             waker,

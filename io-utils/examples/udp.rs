@@ -9,8 +9,7 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use mio::net::UdpSocket;
 use mio::{Interest, Registry, Token};
-
-use nexosim_util::joiners::ThreadJoiner;
+use thread_guard::ThreadGuard;
 
 use nexosim_io_utils::port::{IoPort, IoThread, TryRecvError};
 
@@ -93,7 +92,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut io_thread = IoThread::new(udp);
 
     // Echo UDP server.
-    let echo_thread = ThreadJoiner::new(thread::spawn(|| -> std::io::Result<Bytes> {
+    let echo_thread = ThreadGuard::new(thread::spawn(|| -> std::io::Result<Bytes> {
         let socket = StdUdpSocket::bind(ECHO_THREAD_ADDR)?;
         let mut buf = [0; BUF_SIZE];
         let (len, addr) = socket.recv_from(&mut buf)?;
