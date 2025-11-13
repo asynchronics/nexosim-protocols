@@ -72,7 +72,8 @@ fn main() -> Result<(), SimulationError> {
     // Assembly and initialization.
     let mut simu = SimInit::new()
         .add_model(decoder, decoder_mbox, "decoder")
-        .init(t0)?;
+        .init(t0)?
+        .0;
 
     // ----------
     // Simulation.

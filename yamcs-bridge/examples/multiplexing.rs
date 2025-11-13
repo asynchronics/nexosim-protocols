@@ -244,7 +244,7 @@ fn main() -> Result<(), SimulationError> {
     let inc_1_b_id = bench.register_input(ExampleModel::increment_b, &model1_address);
     let inc_2_b_id = bench.register_input(ExampleModel::increment_b, &model2_address);
 
-    let mut sim = bench.init(MonotonicTime::EPOCH)?;
+    let mut sim = bench.init(MonotonicTime::EPOCH)?.0;
 
     let scheduler = sim.scheduler();
 

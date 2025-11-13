@@ -201,7 +201,7 @@ fn main() -> Result<(), SimulationError> {
 
     let counter_id = bench.register_input(Counter::power_in, &counter_addr);
 
-    let mut simu = bench.set_clock(AutoSystemClock::new()).init(t0)?;
+    let mut simu = bench.set_clock(AutoSystemClock::new()).init(t0)?.0;
     let scheduler = simu.scheduler();
     let mut sim_scheduler = scheduler.clone();
 

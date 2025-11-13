@@ -73,7 +73,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut simu = SimInit::new()
         .add_model(can, can_mbox, "can")
         .set_clock(AutoSystemClock::new())
-        .init(t0)?;
+        .init(t0)?
+        .0;
 
     let mut sim_scheduler = simu.scheduler();
 
