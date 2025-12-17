@@ -28,9 +28,6 @@ keywords = [
 ]
 
 [dependencies]
-mio = { workspace = true }
-thread-guard = { workspace = true }
-
-[dev-dependencies]
 bytes = { workspace = true }
 mio = { workspace = true, features = ["net"] }
+thread-guard = { workspace = true }

@@ -2,18 +2,16 @@
 //! protocol.
 
 use std::error::Error;
-use std::io::{ErrorKind, Result as IoResult};
-use std::net::{SocketAddr, UdpSocket as StdUdpSocket};
+use std::net::UdpSocket as StdUdpSocket;
 use std::sync::mpsc::channel;
 use std::thread::{self, sleep};
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
-use mio::net::UdpSocket;
-use mio::{Interest, Registry, Token};
 use thread_guard::ThreadGuard;
 
-use nexosim_io_utils::port::{IoPort, IoThread, TryRecvError};
+use nexosim_io_utils::port::{IoThread, TryRecvError};
+use nexosim_io_utils::udp::{Data, Udp};
 
 /// Client address.
 const IO_THREAD_ADDR: &str = "127.0.0.1:34254";
@@ -24,75 +22,10 @@ const ECHO_THREAD_ADDR: &str = "127.0.0.1:34255";
 /// Buffer size.
 const BUF_SIZE: usize = 65536;
 
-/// Data to be sent through the interface.
-#[derive(Clone, Debug, PartialEq)]
-struct Data {
-    addr: SocketAddr,
-    bytes: Bytes,
-}
-
-/// UDP port.
-struct Udp {
-    socket: UdpSocket,
-    buffer: Vec<u8>,
-}
-
-impl Udp {
-    /// Creates new UDP port bound to the provided address.
-    pub fn new(addr: SocketAddr) -> Self {
-        Self {
-            socket: UdpSocket::bind(addr).unwrap(),
-            buffer: vec![0; BUF_SIZE],
-        }
-    }
-}
-
-impl IoPort<UdpSocket, Data, Data> for Udp {
-    fn register(&mut self, registry: &Registry) -> Token {
-        registry
-            .register(&mut self.socket, Token(0), Interest::READABLE)
-            .unwrap();
-        // Token used for waking up.
-        Token(1)
-    }
-
-    fn read(&mut self, token: Token) -> IoResult<Data> {
-        // Only read token shall be passed as argument.
-        if token == Token(0) {
-            self.socket
-                .recv_from(&mut self.buffer)
-                .map(|(len, addr)| Data {
-                    addr,
-                    bytes: BytesMut::from(&self.buffer[..len]).into(),
-                })
-        } else {
-            // Unknown event: should never happen.
-            Err(std::io::Error::new(
-                ErrorKind::InvalidInput,
-                "Unknown event.",
-            ))
-        }
-    }
-
-    fn write(&mut self, data: &Data) -> IoResult<()> {
-        self.socket.send_to(&data.bytes, data.addr).map(|len| {
-            if len != data.bytes.len() {
-                Err(std::io::Error::other(format!(
-                    "Not all bytes written: had to write {}, but wrote {}.",
-                    data.bytes.len(),
-                    len
-                )))
-            } else {
-                Ok(())
-            }
-        })?
-    }
-}
-
 /// Uses I/O thread to send data to echo UDP server.
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // UDP I/O port.
-    let udp = Udp::new(IO_THREAD_ADDR.parse()?);
+    let udp = Udp::new(IO_THREAD_ADDR.parse()?, BUF_SIZE);
 
     // I/O thread handling I/O port operations.
     let mut io_thread = IoThread::new(udp);
