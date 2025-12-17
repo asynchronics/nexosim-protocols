@@ -104,7 +104,8 @@ use std::fmt;
 use std::io::{ErrorKind, Result as IoResult};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{
-    channel, Receiver, SendError as MpscSendError, Sender, TryRecvError as MpscTryRecvError,
+    channel, Receiver, RecvError as MpscRecvError, SendError as MpscSendError, Sender,
+    TryRecvError as MpscTryRecvError,
 };
 use std::sync::Arc;
 use std::thread;
@@ -202,6 +203,24 @@ impl fmt::Display for TryRecvError {
 }
 
 impl Error for TryRecvError {}
+
+/// Recv error.
+#[derive(Debug)]
+pub struct RecvError {}
+
+impl From<MpscRecvError> for RecvError {
+    fn from(_: MpscRecvError) -> Self {
+        Self {}
+    }
+}
+
+impl fmt::Display for RecvError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Recv error")
+    }
+}
+
+impl Error for RecvError {}
 
 /// I/O thread.
 pub struct IoThread<R, T>
@@ -302,6 +321,11 @@ where
     /// Tries to receives data from I/O thread.
     pub fn try_recv(&self) -> Result<R, TryRecvError> {
         Ok(self.receiver.try_recv()?)
+    }
+
+    /// Blocks on receiving data from I/O thread.
+    pub fn recv(&self) -> Result<R, RecvError> {
+        Ok(self.receiver.recv()?)
     }
 
     /// Sends data to I/O thread.
