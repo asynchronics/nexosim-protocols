@@ -1,9 +1,9 @@
-//! Ports I/O utilities.
+//! # Ports I/O utilities.
 //!
 //! This module contains utilities useful for external I/O ports support in
 //! NeXosim simulation benches.
 //!
-//! # I/O ports and I/O threads
+//! ## I/O ports and I/O threads
 //!
 //! To communicate with the external world a NeXosim model can use an
 //! [`IoThread`]. This is a thread guard that spawns a thread in its constructor
@@ -84,8 +84,7 @@
 //!     fn write(&mut self, data: &Data) -> IoResult<()> {
 //!         self.socket.send_to(&data.bytes, data.addr).map(|len| {
 //!             if len != data.bytes.len() {
-//!                 Err(std::io::Error::new(
-//!                     ErrorKind::Other,
+//!                 Err(std::io::Error::other(
 //!                     format!(
 //!                         "Not all bytes written: had to write {}, but wrote {}.",
 //!                         data.bytes.len(),
@@ -103,17 +102,18 @@
 use std::error::Error;
 use std::fmt;
 use std::io::{ErrorKind, Result as IoResult};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{
-    Receiver, SendError as MpscSendError, Sender, TryRecvError as MpscTryRecvError, channel,
+    channel, Receiver, RecvError as MpscRecvError, SendError as MpscSendError, Sender,
+    TryRecvError as MpscTryRecvError,
 };
+use std::sync::Arc;
 use std::thread;
 
 use mio::event::Source;
 use mio::{Events, Poll, Registry, Token, Waker};
 
-use nexosim_util::joiners::ThreadJoiner;
+use thread_guard::ThreadGuard;
 
 /// I/O port(s) usable by MIO.
 pub trait IoPort<S, R, T>
@@ -127,7 +127,7 @@ where
     /// This function should return waker token.
     fn register(&mut self, registry: &Registry) -> Token;
 
-    /// Reads data corresponding to token.
+    /// Reads data corresponding to the token.
     fn read(&mut self, token: Token) -> IoResult<R>;
 
     /// Writes data.
@@ -204,15 +204,32 @@ impl fmt::Display for TryRecvError {
 
 impl Error for TryRecvError {}
 
+/// Recv error.
+#[derive(Debug)]
+pub struct RecvError {}
+
+impl From<MpscRecvError> for RecvError {
+    fn from(_: MpscRecvError) -> Self {
+        Self {}
+    }
+}
+
+impl fmt::Display for RecvError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Recv error")
+    }
+}
+
+impl Error for RecvError {}
+
 /// I/O thread.
 pub struct IoThread<R, T>
 where
     R: Send,
     T: Send,
 {
-    /// I/O thread handle.
-    // This field must precede waker in order for drop to work properly.
-    _io_thread: ThreadJoiner<()>,
+    /// I/O thread guard.
+    _io_thread: ThreadGuard<()>,
 
     /// Data receiver.
     receiver: Receiver<R>,
@@ -222,9 +239,6 @@ where
 
     /// Thread waker.
     waker: Arc<Waker>,
-
-    /// Simulation halted flag.
-    is_halted: Arc<AtomicBool>,
 }
 
 impl<R, T> IoThread<R, T>
@@ -242,11 +256,12 @@ where
         let (transmitter, rx) = channel();
 
         let is_halted = Arc::new(AtomicBool::new(false));
-        let io_is_halted = is_halted.clone();
+        let guard_is_halted = is_halted.clone();
 
         let mut poll = Poll::new().unwrap();
         let wake = port.register(poll.registry());
         let waker = Arc::new(Waker::new(poll.registry(), wake).unwrap());
+        let guard_waker = waker.clone();
 
         // I/O thread.
         let io_thread = thread::spawn(move || {
@@ -258,7 +273,7 @@ where
                 for event in events.iter() {
                     let token = event.token();
                     if token == wake {
-                        if io_is_halted.load(Ordering::Relaxed) {
+                        if is_halted.load(Ordering::Relaxed) {
                             break 'poll;
                         }
                         while let Ok(data) = rx.try_recv() {
@@ -284,12 +299,22 @@ where
                 }
             }
         });
+
         Self {
-            _io_thread: ThreadJoiner::new(io_thread),
+            _io_thread: ThreadGuard::with_pre_action(io_thread, move |_| {
+                guard_is_halted.store(true, Ordering::Relaxed);
+                let _ = guard_waker.wake();
+                // Waker shall live long enough, otherwise the wake signal would
+                // not be delivered. A clone is stored in the parent structure,
+                // but to avoid issues when code is changed we return waker to
+                // the caller. Otherwise a change of fields order or removing of
+                // the `waker` in the `IoThread` structure would impact the
+                // waking mechanism.
+                guard_waker
+            }),
             receiver,
             transmitter,
             waker,
-            is_halted,
         }
     }
 
@@ -298,22 +323,16 @@ where
         Ok(self.receiver.try_recv()?)
     }
 
+    /// Blocks on receiving data from I/O thread.
+    pub fn recv(&self) -> Result<R, RecvError> {
+        Ok(self.receiver.recv()?)
+    }
+
     /// Sends data to I/O thread.
     pub fn send(&mut self, data: T) -> Result<(), SendError> {
         self.transmitter.send(data)?;
         self.waker.wake()?;
         Ok(())
-    }
-}
-
-impl<R, T> Drop for IoThread<R, T>
-where
-    R: Send,
-    T: Send,
-{
-    fn drop(&mut self) {
-        self.is_halted.store(true, Ordering::Relaxed);
-        let _ = self.waker.wake();
     }
 }
 

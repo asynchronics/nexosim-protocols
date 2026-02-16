@@ -1,5 +1,5 @@
 [package]
-name = "nexosim-io-utils"
+name = "nexosim-yamcs-derive"
 # When incrementing version and releasing to crates.io:
 # - Update crate version in this Cargo.toml
 # - Update crate version in README.md
@@ -12,22 +12,26 @@ authors = ["Asynchronics"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/asynchronics/nexosim-protocols"
 readme = "README.md"
-homepage = "https://github.com/asynchronics/nexosim-protocols/io-utils"
-version = "0.1.0-alpha.1"
+homepage = "https://github.com/asynchronics/nexosim-protocols/yamcs-derive"
+version = "0.1.0"
 edition = "2024"
 description="""
-I/O utilities for NeXosim-based simulations.
+Yamcs bridge types macros for NeXosim-based simulations.
 """
 categories = ["simulation", "aerospace", "science"]
 keywords = [
     "simulation",
     "discrete-event",
     "systems",
+    "cyberphysical",
     "real-time",
-    "stream",
+    "serial-port",
 ]
 
+[lib]
+proc-macro = true
+
 [dependencies]
-bytes = { workspace = true }
-mio = { workspace = true, features = ["net"] }
-thread-guard = { workspace = true }
+quote = "1"
+proc-macro2 = "1.0"
+syn = "2.0"
