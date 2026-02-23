@@ -15,20 +15,14 @@ readme = "README.md"
 homepage = "https://github.com/asynchronics/nexosim-protocols/byte-utils"
 version = "0.1.0-alpha.1"
 edition = "2024"
-description="""
+description = """
 Byte and stream manipulation utilities for NeXosim-based simulations.
 """
 categories = ["simulation", "aerospace", "science"]
-keywords = [
-    "simulation",
-    "discrete-event",
-    "systems",
-    "real-time",
-    "stream",
-]
+keywords = ["simulation", "discrete-event", "systems", "real-time", "stream"]
 
 [dependencies]
 buf-list = "1"
-bytes = { workspace = true }
+bytes = { workspace = true, features = ["serde"] }
 nexosim = { workspace = true }
 serde = { workspace = true }

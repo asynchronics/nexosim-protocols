@@ -12,7 +12,7 @@
 //!                        └───────────┘
 //! ```
 
-use nexosim::ports::EventQueue;
+use nexosim::ports::{EventSinkReader, EventSource, SinkState, event_queue};
 use nexosim::simulation::{Mailbox, SimInit, SimulationError};
 use nexosim::time::MonotonicTime;
 
@@ -49,73 +49,62 @@ fn main() -> Result<(), SimulationError> {
     // Mailboxes.
     let decoder_mbox = Mailbox::new();
 
+    // Bench.
+    let mut bench = SimInit::new();
+
     // Model handles for simulation.
-    let decoded = EventQueue::new();
-    decoder.data_out.connect_sink(&decoded);
-    let mut decoded = decoded.into_reader();
-    let decoder_addr = decoder_mbox.address();
+    let (sink, mut decoded) = event_queue(SinkState::Enabled);
+    decoder.data_out.connect_sink(sink);
+
+    let bytes_in = EventSource::new()
+        .connect(KissModel::bytes_in, &decoder_mbox)
+        .register(&mut bench);
 
     // Start time (arbitrary since models do not depend on absolute time).
     let t0 = MonotonicTime::EPOCH;
 
     // Assembly and initialization.
-    let mut simu = SimInit::new()
-        .add_model(decoder, decoder_mbox, "decoder")
-        .init(t0)?
-        .0;
+    let mut simu = bench.add_model(decoder, decoder_mbox, "decoder").init(t0)?;
 
     // ----------
     // Simulation.
     // ----------
 
     // Send data with no frame encoded.
-    simu.process_event(KissModel::bytes_in, vec![0x00].into(), &decoder_addr)?;
-    assert_eq!(decoded.next(), None);
+    simu.process_event(&bytes_in, vec![0x00].into())?;
+    assert_eq!(decoded.try_read(), None);
 
     // Send data with two correct frames.
     simu.process_event(
-        KissModel::bytes_in,
+        &bytes_in,
         vec![FEND, 0xAA, FEND, FEND, FEND, 0x01, FEND].into(),
-        &decoder_addr,
     )?;
     for _ in 0..2 {
-        assert_eq!(decoded.next(), Some(Data::Pulse));
+        assert_eq!(decoded.try_read(), Some(Data::Pulse));
     }
-    assert_eq!(decoded.next(), None);
+    assert_eq!(decoded.try_read(), None);
 
     // Send beginning of a frame.
-    simu.process_event(KissModel::bytes_in, vec![FEND, 0xAA].into(), &decoder_addr)?;
-    assert_eq!(decoded.next(), None);
+    simu.process_event(&bytes_in, vec![FEND, 0xAA].into())?;
+    assert_eq!(decoded.try_read(), None);
 
     // Finish the frame.
-    simu.process_event(KissModel::bytes_in, vec![FEND].into(), &decoder_addr)?;
-    assert_eq!(decoded.next(), Some(Data::Pulse));
+    simu.process_event(&bytes_in, vec![FEND].into())?;
+    assert_eq!(decoded.try_read(), Some(Data::Pulse));
 
     // Send data with an escaped byte
-    simu.process_event(
-        KissModel::bytes_in,
-        vec![FEND, FESC, TFEND, 0xAA, FEND].into(),
-        &decoder_addr,
-    )?;
-    assert_eq!(decoded.next(), Some(Data::Pulse));
+    simu.process_event(&bytes_in, vec![FEND, FESC, TFEND, 0xAA, FEND].into())?;
+    assert_eq!(decoded.try_read(), Some(Data::Pulse));
 
     // Abort transmition.
-    simu.process_event(
-        KissModel::bytes_in,
-        vec![FEND, 0xAA, FESC, FESC, 0xBB, FEND].into(),
-        &decoder_addr,
-    )?;
-    assert_eq!(decoded.next(), Some(Data::Aborted));
+    simu.process_event(&bytes_in, vec![FEND, 0xAA, FESC, FESC, 0xBB, FEND].into())?;
+    assert_eq!(decoded.try_read(), Some(Data::Aborted));
 
     // Ignoring last FESC.
-    simu.process_event(
-        KissModel::bytes_in,
-        vec![FEND, 0xAA, FESC, FEND].into(),
-        &decoder_addr,
-    )?;
-    assert_eq!(decoded.next(), Some(Data::Pulse));
+    simu.process_event(&bytes_in, vec![FEND, 0xAA, FESC, FEND].into())?;
+    assert_eq!(decoded.try_read(), Some(Data::Pulse));
 
-    assert_eq!(decoded.next(), None);
+    assert_eq!(decoded.try_read(), None);
 
     Ok(())
 }

@@ -8,19 +8,16 @@ mod yamcs_value;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use schematic::Config;
 
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::TryRecvError;
 
-use nexosim::model::{BuildContext, Context, InitializedModel, ProtoModel};
+use nexosim::model::{BuildContext, Context, Model, ProtoModel, schedulable};
 use nexosim::ports::Requestor;
 use nexosim::time::MonotonicTime;
-use nexosim::{Model, schedulable};
 
 #[cfg(feature = "derive")]
 pub use nexosim_yamcs_derive::YamcsValue;
@@ -43,7 +40,7 @@ pub struct MsgToYamcs {
 /// A parameter update from Yamcs.
 ///
 /// This is an opaque type  meant to be consumed by routing functions.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MsgFromYamcs {
     value: EncodedYamcsValue,
     id: u32,
@@ -63,19 +60,6 @@ pub struct YamcsConfig {
     /// Server port.
     #[setting(default = 7897)]
     pub port: u16,
-
-    /// Initial time offset for the auto-scheduling of
-    /// `YamcsBridge::update_from_yamcs`.
-    ///
-    /// Set to `period` if no value is provided. Ignored if `period` is not set.
-    pub delta: Option<u64>,
-
-    /// Repetition period for the auto-scheduling of
-    /// `YamcsBridge::update_from_yamcs`.
-    ///
-    /// If no value is provided, cyclic activities are not scheduled
-    /// automatically.
-    pub period: Option<u64>,
 }
 
 /// A builder type for the [`YamcsBridge`] model.
@@ -335,14 +319,14 @@ impl ProtoModel for ProtoYamcsBridge {
     /// # Panics
     ///
     /// Panics if the Yamcs gateway server could not be started.
-    fn build(self, _: &mut BuildContext<Self>) -> (YamcsBridge, YamcsBridgeEnv) {
+    fn build(self, cx: &mut BuildContext<Self>) -> (YamcsBridge, YamcsBridgeEnv) {
         let (tx, gateway_rx) = mpsc::unbounded_channel();
-        let (gateway_tx, rx) = mpsc::unbounded_channel();
 
         server::start(
             self.param_definitions,
             self.param_values,
-            gateway_tx,
+            cx.injector(),
+            *schedulable!(YamcsBridge::msg_from_yamcs),
             gateway_rx,
             self.config.port,
         )
@@ -351,10 +335,8 @@ impl ProtoModel for ProtoYamcsBridge {
         (
             YamcsBridge {
                 from_yamcs: self.from_yamcs,
-                delta: self.config.delta,
-                period: self.config.period,
             },
-            YamcsBridgeEnv { tx, rx },
+            YamcsBridgeEnv { tx },
         )
     }
 }
@@ -363,7 +345,6 @@ impl ProtoModel for ProtoYamcsBridge {
 #[derive(Debug)]
 pub struct YamcsBridgeEnv {
     tx: mpsc::UnboundedSender<StampedMsgToYamcs>,
-    rx: mpsc::UnboundedReceiver<MsgFromYamcs>,
 }
 
 /// A model acting as a proxy for connected Yamcs instances.
@@ -373,45 +354,26 @@ pub struct YamcsBridgeEnv {
 /// models using only one input port ([`to_yamcs`](Self::to_yamcs)) and one
 /// requestor port ([`from_yamcs`](Self::from_yamcs)).
 ///
-/// Note that the [`update_from_yamcs`](Self::update_from_yamcs) port must be
-/// regularly triggered to ensure that parameter modification requests from
-/// Yamcs are processed.
-#[derive(Debug, Serialize, Deserialize)]
+// FIXME: remove `Clone` bound once
+// https://github.com/asynchronics/nexosim/pull/165 is merged into main.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct YamcsBridge {
     /// A requestor port forwarding parameter modification requests from Yamcs.
     ///
     /// The request should be acknowledged by replying with the value that was
     /// actually set, which may be different from the requested value.
     pub from_yamcs: Requestor<MsgFromYamcs, MsgToYamcs>,
-
-    delta: Option<u64>,
-    period: Option<u64>,
 }
 
 #[Model(type Env = YamcsBridgeEnv)]
 impl YamcsBridge {
-    /// Initializes Yamcs bridge model.
-    #[nexosim(init)]
-    async fn init(self, context: &mut Context<Self>) -> InitializedModel<Self> {
-        // Schedule periodic function that processes external events.
-        if let Some(period) = self.period {
-            let delta = self.delta.unwrap_or(period);
-
-            context
-                .schedule_periodic_event(
-                    Duration::from_millis(delta),
-                    Duration::from_millis(period),
-                    schedulable!(Self::update_from_yamcs),
-                    (),
-                )
-                .unwrap();
-        }
-
-        self.into()
-    }
-
     /// Forwards the value of a registered parameter to Yamcs -- input port.
-    pub async fn to_yamcs(&mut self, msg: MsgToYamcs, cx: &mut Context<Self>) {
+    pub async fn to_yamcs(
+        &mut self,
+        msg: MsgToYamcs,
+        cx: &Context<Self>,
+        env: &mut YamcsBridgeEnv,
+    ) {
         let timestamp = cx.time();
         let msg = StampedMsgToYamcs {
             value: msg.value,
@@ -419,50 +381,38 @@ impl YamcsBridge {
             timestamp,
         };
         // the receiver should never be dropped while the model is alive.
-        cx.env().tx.send(msg).unwrap();
+        env.tx.send(msg).unwrap();
     }
 
-    /// Triggers the processing of all pending parameter modifications requested
-    /// by Yamcs. -- input port.
+    /// Receives a message from Yamcs.
     ///
-    /// # Important
-    ///
-    /// This port must be scheduled regularly, failing which the simulation will
-    /// lag behind Yamcs requests.
-    ///
-    /// Typically, parameter modifications request from Yamcs are triggered by a
-    /// human operator, meaning that updates need not be scheduled more than
-    /// once or a few times per second.
+    /// This port is called by the background server's injector.
     #[nexosim(schedulable)]
-    pub async fn update_from_yamcs(&mut self, _: (), cx: &mut Context<Self>) {
-        loop {
-            let msg = match cx.env().rx.try_recv() {
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    panic!("The channel was unexpectedly closed by the Yamcs proxy")
-                }
-                Ok(msg) => msg,
-            };
-            let id = msg.id;
+    async fn msg_from_yamcs(
+        &mut self,
+        msg: MsgFromYamcs,
+        cx: &Context<Self>,
+        env: &mut YamcsBridgeEnv,
+    ) {
+        let id = msg.id;
 
-            let timestamp = cx.time();
+        let timestamp = cx.time();
 
-            let mut replies = self.from_yamcs.send(msg).await;
-            match replies.next() {
-                None => {} // just ignore if no model is connected
-                Some(reply) => {
-                    let validated_msg = StampedMsgToYamcs {
-                        value: reply.value,
-                        id,
-                        timestamp,
-                    };
-                    cx.env().tx.send(validated_msg).unwrap();
+        let mut replies = self.from_yamcs.send(msg).await;
+        match replies.next() {
+            None => {} // just ignore if no model is connected
+            Some(reply) => {
+                let validated_msg = StampedMsgToYamcs {
+                    value: reply.value,
+                    id,
+                    timestamp,
+                };
+                env.tx.send(validated_msg).unwrap();
 
-                    assert!(
-                        replies.next().is_none(),
-                        "Unexpectedly received more than one reply when sending a Yamcs parameter update to models"
-                    );
-                }
+                assert!(
+                    replies.next().is_none(),
+                    "Unexpectedly received more than one reply when sending a Yamcs parameter update to models"
+                );
             }
         }
     }

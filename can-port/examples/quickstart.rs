@@ -19,9 +19,9 @@ use socketcan::{BlockingCan, CanFrame, CanSocket, EmbeddedFrame, Id, Socket, Sta
 
 use thread_guard::ThreadGuard;
 
-use nexosim::ports::EventQueue;
+use nexosim::ports::{EventSinkReader, SinkState, event_queue};
 use nexosim::simulation::{ExecutionError, Mailbox, SimInit};
-use nexosim::time::{AutoSystemClock, MonotonicTime};
+use nexosim::time::{AutoSystemClock, MonotonicTime, PeriodicTicker};
 
 use nexosim_can_port::{CanPortConfig, ProtoCanPort};
 
@@ -32,11 +32,6 @@ const CAN_INTERFACES: &[&str] = &["vcan0", "vcan1"];
 
 /// Pulse data ID.
 const ID: u16 = 0x100;
-
-/// Activation period, in milliseconds, for cyclic activities inside the simulation.
-const PERIOD: u64 = 10;
-/// Time shift, in milliseconds, for scheduling events at the present moment.
-const DELTA: u64 = 5;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // ---------------
@@ -50,21 +45,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     loader
         .code(format!("interfaces = {CAN_INTERFACES:?}"), Format::Toml)
         .unwrap();
-    loader
-        .code(format!("delta = {DELTA}"), Format::Toml)
-        .unwrap();
-    loader
-        .code(format!("period = {PERIOD}"), Format::Toml)
-        .unwrap();
     let mut can = ProtoCanPort::new(loader.load().unwrap().config);
 
     // Mailboxes.
     let can_mbox = Mailbox::new();
 
     // Model handles for simulation.
-    let frames = EventQueue::new();
-    can.frame_out.connect_sink(&frames);
-    let mut frames = frames.into_reader();
+    let (sink, mut frames) = event_queue(SinkState::Enabled);
+    can.frame_out.connect_sink(sink);
 
     // Start time (arbitrary since models do not depend on absolute time).
     let t0 = MonotonicTime::EPOCH;
@@ -72,21 +60,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Assembly and initialization.
     let mut simu = SimInit::new()
         .add_model(can, can_mbox, "can")
-        .set_clock(AutoSystemClock::new())
-        .init(t0)?
-        .0;
+        .with_clock(
+            AutoSystemClock::new(),
+            PeriodicTicker::new(Duration::from_millis(100)),
+        )
+        .init(t0)?;
 
-    let mut sim_scheduler = simu.scheduler();
+    let scheduler = simu.scheduler();
 
     // Simulation thread.
     let simulation_handle = ThreadGuard::with_actions(
         thread::spawn(move || {
             // ---------- Simulation.  ----------
-            // Infinitely kept alive by the ticker model until halted.
-            simu.step_unbounded()
+            simu.run()
         }),
         move |_| {
-            sim_scheduler.halt();
+            scheduler.halt();
         },
         |_, res| {
             println!("Simulation thread result: {res:?}.");
@@ -100,11 +89,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut socket = CanSocket::open(CAN_INTERFACES[0]).unwrap();
     socket.transmit(&frame)?;
 
-    // Wait for update method to forward frame.
-    sleep(Duration::from_millis(PERIOD + 2 * DELTA));
+    // Wait 3 ticks before forwarding frame.
+    sleep(Duration::from_millis(3 * 100));
 
     // Receive the frame from the simulation.
-    let received = frames.next().unwrap();
+    let received = frames.read().unwrap();
     assert_eq!(0, received.interface);
     assert_eq!(frame.id(), received.frame.id());
     assert_eq!(frame.data(), received.frame.data());

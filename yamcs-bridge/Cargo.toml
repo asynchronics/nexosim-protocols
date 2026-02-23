@@ -15,6 +15,7 @@ readme = "README.md"
 homepage = "https://github.com/asynchronics/nexosim-protocols/yamcs-bridge"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88.0"
 publish = ["nexosim"]
 
 [features]
@@ -33,7 +34,7 @@ tokio-stream = { version = "0.1", default-features = false }
 tracing = { workspace = true }
 
 [dev-dependencies]
-schematic = { workspace = true, features = [ "toml" ] }
+schematic = { workspace = true, features = ["toml"] }
 
 [target.'cfg(yamcs_bridge_codegen)'.build-dependencies]
 prost-build = { version = "0.13" }

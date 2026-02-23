@@ -6,11 +6,12 @@ use std::net::SocketAddr;
 use bytes::{Bytes, BytesMut};
 use mio::net::UdpSocket;
 use mio::{Interest, Registry, Token};
+use serde::{Deserialize, Serialize};
 
 use crate::port::IoPort;
 
 /// Data to be sent through the interface.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Data {
     /// Address on the other side.
     pub addr: SocketAddr,

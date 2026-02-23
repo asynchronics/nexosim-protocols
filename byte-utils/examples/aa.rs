@@ -17,7 +17,7 @@ use bytes::Buf;
 
 use serde::{Deserialize, Serialize};
 
-use nexosim::ports::EventQueue;
+use nexosim::ports::{EventSinkReader, EventSource, SinkState, event_queue};
 use nexosim::simulation::{Mailbox, SimInit, SimulationError};
 use nexosim::time::MonotonicTime;
 
@@ -60,39 +60,37 @@ fn main() -> Result<(), SimulationError> {
     // Mailboxes.
     let decoder_mbox = Mailbox::new();
 
+    // Bench.
+    let mut bench = SimInit::new();
+
     // Model handles for simulation.
-    let decoded = EventQueue::new();
-    decoder.data_out.connect_sink(&decoded);
-    let mut decoded = decoded.into_reader();
-    let decoder_addr = decoder_mbox.address();
+    let (sink, mut decoded) = event_queue(SinkState::Enabled);
+    decoder.data_out.connect_sink(sink);
+
+    let bytes_in = EventSource::new()
+        .connect(Decoder::bytes_in, &decoder_mbox)
+        .register(&mut bench);
 
     // Start time (arbitrary since models do not depend on absolute time).
     let t0 = MonotonicTime::EPOCH;
 
     // Assembly and initialization.
-    let mut simu = SimInit::new()
-        .add_model(decoder, decoder_mbox, "decoder")
-        .init(t0)?
-        .0;
+    let mut simu = bench.add_model(decoder, decoder_mbox, "decoder").init(t0)?;
 
     // ----------
     // Simulation.
     // ----------
 
     // Send data with no pulses encoded.
-    simu.process_event(Decoder::bytes_in, vec![0x00].into(), &decoder_addr)?;
-    assert_eq!(decoded.next(), None);
+    simu.process_event(&bytes_in, vec![0x00].into())?;
+    assert_eq!(decoded.try_read(), None);
 
     // Send data with two pulses encoded.
-    simu.process_event(
-        Decoder::bytes_in,
-        vec![0x01, 0xAA, 0xAA].into(),
-        &decoder_addr,
-    )?;
+    simu.process_event(&bytes_in, vec![0x01, 0xAA, 0xAA].into())?;
     for _ in 0..2 {
-        assert_eq!(decoded.next(), Some(()));
+        assert_eq!(decoded.try_read(), Some(()));
     }
-    assert_eq!(decoded.next(), None);
+    assert_eq!(decoded.try_read(), None);
 
     Ok(())
 }

@@ -46,15 +46,14 @@
 
 use std::time::Duration;
 
-use schematic::{ConfigLoader, Format};
+use schematic::ConfigLoader;
 
 use serde::{Deserialize, Serialize};
 
-use nexosim::Model;
-use nexosim::model::{Context, InitializedModel};
-use nexosim::ports::Output;
+use nexosim::model::Model;
+use nexosim::ports::{EventSource, Output};
 use nexosim::simulation::{Mailbox, SimInit, SimulationError};
-use nexosim::time::{AutoSystemClock, MonotonicTime};
+use nexosim::time::{AutoSystemClock, MonotonicTime, PeriodicTicker};
 
 use nexosim_yamcs_bridge::{ProtoYamcsBridge, YamcsBridge, YamcsConfig};
 
@@ -77,11 +76,9 @@ struct ExampleModel {
 impl ExampleModel {
     /// Initializes example model.
     #[nexosim(init)]
-    async fn init(mut self, _: &mut Context<Self>) -> InitializedModel<Self> {
+    async fn init(&mut self) {
         self.param_a_out.send(self.param_a).await;
         self.param_b_out.send(self.param_b).await;
-
-        self.into()
     }
 
     /// Constructs a new model with both parameters set to zero.
@@ -125,20 +122,7 @@ impl ExampleModel {
 }
 
 fn main() -> Result<(), SimulationError> {
-    // IMPORTANT: `YamcsBridge::update_from_yamcs` must be scheduled regularly,
-    // otherwise parameter updates from Yamcs will never get pushed to the
-    // models. Since Yamcs updates typically involve a human in the loop, there
-    // is no need to do this too frequently, but too long a period will
-    // introduce some lag in the acknowledgement.
-    //
-    // In the below example, the model is configured to auto-schedule this call
-    // every 500ms. Alternatively, this could be done explicitly by calling
-    // `scheduler.schedule_periodic_event`.
-    let mut cfg_loader = ConfigLoader::<YamcsConfig>::new();
-    cfg_loader
-        .code(format!("period = {}", 500), Format::Toml)
-        .unwrap();
-    let cfg = cfg_loader.load().unwrap().config;
+    let cfg = ConfigLoader::<YamcsConfig>::new().load().unwrap().config;
 
     // Models and model builders.
     let mut yamcs = ProtoYamcsBridge::new(cfg);
@@ -149,8 +133,6 @@ fn main() -> Result<(), SimulationError> {
     let yamcs_mbox = Mailbox::new();
     let model1_mbox = Mailbox::new();
     let model2_mbox = Mailbox::new();
-    let model1_address = model1_mbox.address();
-    let model2_address = model2_mbox.address();
 
     // Register read-only and read-write parameters to be exchanged with Yamcs.
     // The registration methods return opaque connection mapping/filtering
@@ -230,21 +212,31 @@ fn main() -> Result<(), SimulationError> {
         model2_mbox.address(),
     );
 
-    // Create the simulation, using a real-time clock.
-    //
-    // The simulator clock is arbitrarily set to the 1970 TAI epoch.
-    let mut bench = SimInit::new()
-        .set_clock(AutoSystemClock::new())
+    // Create the simulation, using a real-time clock..
+    let mut bench = SimInit::new();
+
+    let inc_1_a = EventSource::new()
+        .connect(ExampleModel::increment_a, &model1_mbox)
+        .register(&mut bench);
+    let inc_2_a = EventSource::new()
+        .connect(ExampleModel::increment_a, &model2_mbox)
+        .register(&mut bench);
+    let inc_1_b = EventSource::new()
+        .connect(ExampleModel::increment_b, &model1_mbox)
+        .register(&mut bench);
+    let inc_2_b = EventSource::new()
+        .connect(ExampleModel::increment_b, &model2_mbox)
+        .register(&mut bench);
+
+    let mut sim = bench
+        .with_clock(
+            AutoSystemClock::new(),
+            PeriodicTicker::new(Duration::from_millis(10)),
+        )
         .add_model(yamcs, yamcs_mbox, "Yamcs model")
         .add_model(model1, model1_mbox, "Model 1")
-        .add_model(model2, model2_mbox, "Model 1");
-
-    let inc_1_a_id = bench.register_input(ExampleModel::increment_a, &model1_address);
-    let inc_2_a_id = bench.register_input(ExampleModel::increment_a, &model2_address);
-    let inc_1_b_id = bench.register_input(ExampleModel::increment_b, &model1_address);
-    let inc_2_b_id = bench.register_input(ExampleModel::increment_b, &model2_address);
-
-    let mut sim = bench.init(MonotonicTime::EPOCH)?.0;
+        .add_model(model2, model2_mbox, "Model 1")
+        .init(MonotonicTime::EPOCH)?;
 
     let scheduler = sim.scheduler();
 
@@ -252,7 +244,7 @@ fn main() -> Result<(), SimulationError> {
     scheduler.schedule_periodic_event(
         Duration::from_secs(1),
         Duration::from_secs(1),
-        &inc_1_a_id,
+        &inc_1_a,
         1,
     )?;
 
@@ -260,7 +252,7 @@ fn main() -> Result<(), SimulationError> {
     scheduler.schedule_periodic_event(
         Duration::from_secs(2),
         Duration::from_secs(2),
-        &inc_2_a_id,
+        &inc_2_a,
         1,
     )?;
 
@@ -268,7 +260,7 @@ fn main() -> Result<(), SimulationError> {
     scheduler.schedule_periodic_event(
         Duration::from_secs(5),
         Duration::from_secs(5),
-        &inc_1_b_id,
+        &inc_1_b,
         1.0,
     )?;
 
@@ -276,7 +268,7 @@ fn main() -> Result<(), SimulationError> {
     scheduler.schedule_periodic_event(
         Duration::from_secs(10),
         Duration::from_secs(10),
-        &inc_2_b_id,
+        &inc_2_b,
         1.0,
     )?;
 

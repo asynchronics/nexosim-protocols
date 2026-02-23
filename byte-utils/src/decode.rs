@@ -4,25 +4,23 @@
 //!
 //! ## `ByteDecoderModel` model
 //!
-//! The main type is [`ByteDecoderModel`] model that accepts byte stream input
-//! and outputs the parsed data. The parsed data is expected to include variant
-//! for decoding errors that are not ignored. This model is generic over
-//! [`BufDecoder`] that implements decoding functionality. Its method
-//! [`BufDecoder::decode`] operates on an implementer of the
-//! [`bytes::Buf`](https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html)
-//! trait. The decoded result can have one of the following values:
-//! * [`BufDecoderResult::Empty`] meaning that buffer has been exhausted and
+//! The [`ByteDecoderModel`] model accepts a stream of bytes at its inputs and
+//! outputs the parsed data. The type of the parsed data is expected to have a
+//! variant for decoding errors that are not ignored. This model is generic over
+//! [`BufDecoder`], which implements the decoding functionality. Method
+//! [`BufDecoder::decode`] operates on any implementer of the
+//! [`bytes::Buf`](https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html) trait.
+//! The decoded result can have one of the following values:
+//! * [`BufDecoderResult::Empty`]: the buffer has been exhausted and ignored,
+//! * [`BufDecoderResult::Partial`]: the buffer has been exhausted and part of
+//!   messages parsed,
+//! * [`BufDecoderResult::Ignored`]: part of the buffer has been consumed and
 //!   ignored,
-//! * [`BufDecoderResult::Partial`] meaning that buffer has been exhausted and
-//!   part of messages parsed,
-//! * [`BufDecoderResult::Ignored`] meaning that part of the buffer has been
-//!   consumed and ignored,
-//! * [`BufDecoderResult::Decoded`] meaning that part of the buffer has been
-//!   consumed and decoded.
+//! * [`BufDecoderResult::Decoded`]: part of the buffer has been consumed and
+//!   decoded.
 //!
 //! The following example shows a model that produces a pulse for every `0xAA`
-//! byte in the input stream and ignores all the other bytes. To make its usage
-//! easier a new type is defined.
+//! byte in the input stream and ignores all other bytes.
 //!
 //! ```rust
 //! use bytes::Buf;
@@ -58,11 +56,11 @@
 //!
 //! ## `ByteDelimitedDecoder`
 //!
-//! [`ByteDelimitedDecoder`] can serve as a more complicated example. In its
-//! simplest usage it can decode data separated by delimiter bytes as in the
-//! following example, which shows how to generate a pulse for every byte
-//! sequence of the form `[0xFF, ..., 0xAA]`, where `...` is any non-empty
-//! sequence of bytes.
+//! [`ByteDelimitedDecoder`] can serve as a more complex example. In its
+//! simplest usage, it can decode data separated based on delimiter bytes. The
+//! following example shows how to generate a pulse for every byte sequence of
+//! the form `[0xFF, ..., 0xAA]`, where `...` is any non-empty sequence of
+//! bytes.
 //!
 //! ```rust
 //! use nexosim_byte_utils::decode::{ByteDelimitedDecoder, ByteDelimitedDecoderEnv, ProtoByteDecoder};
@@ -73,8 +71,8 @@
 //! );
 //! ```
 //!
-//! For a more interesting example see an implementation of the KISS protocol
-//! decoder in [`kiss_decoder`] module.
+//! For a more realistic example, see the implementation of the KISS protocol
+//! decoder in the [`kiss_decoder`] module.
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
@@ -87,8 +85,7 @@ use serde::de::{self, DeserializeOwned, MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
-use nexosim::Model;
-use nexosim::model::{Context, ProtoModel};
+use nexosim::model::{Context, Model, ProtoModel};
 use nexosim::ports::Output;
 
 /// Buffer list wrapper implementing serialization.
@@ -190,7 +187,7 @@ pub enum BufDecoderResult<T> {
     Empty,
     /// Input buffer consumed, message decoding in progress.
     Partial,
-    /// Part of the input ignored, there is more data.
+    /// Part of the input was ignored, there is more data.
     Ignored,
     /// Part of the input buffer is decoded, there may be more data.
     Decoded(T),
@@ -304,10 +301,10 @@ where
     D: BufDecoder<T> + Send + 'static,
 {
     /// Input bytes -- input port.
-    pub async fn bytes_in(&mut self, data: Bytes, cx: &mut Context<Self>) {
+    pub async fn bytes_in(&mut self, data: Bytes, _: &Context<Self>, env: &mut D::DecoderEnv) {
         self.buf.push_chunk(data);
         loop {
-            match self.decoder.decode(&mut *self.buf, cx.env()) {
+            match self.decoder.decode(&mut *self.buf, env) {
                 BufDecoderResult::Decoded(data) => self.data_out.send(data).await,
                 BufDecoderResult::Ignored => {}
                 _ => break,

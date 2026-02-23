@@ -1,15 +1,20 @@
 [workspace]
-members = ["byte-utils", "can-port", "io-utils", "serial-port", "yamcs-bridge", "yamcs-derive"]
+members = [
+    "byte-utils",
+    "can-port",
+    "io-utils",
+    "serial-port",
+    "yamcs-bridge",
+    "yamcs-derive",
+]
 resolver = "3"
 
 [workspace.dependencies]
-bytes = "1.10"
-mio = {version = "1", features = ["os-poll", "os-ext"] }
-nexosim = { git = "https://github.com/asynchronics/nexosim.git", rev = "a22333" }
-nexosim-util = { git = "https://github.com/asynchronics/nexosim.git", rev = "a22333" }
+bytes = { version = "1.10", features = ["serde"] }
+mio = { version = "1", features = ["os-poll", "os-ext"] }
+nexosim = "1"
+nexosim-util = "0.2"
+tracing = { version = "0.1.40", default-features = false, features = ["std"] }
 schematic = "0.18"
 serde = "1"
 thread-guard = "0.1.0"
-tracing = { version = "0.1.40", default-features = false, features = [
-    "std",
-]}

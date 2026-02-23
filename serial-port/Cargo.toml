@@ -15,7 +15,8 @@ readme = "README.md"
 homepage = "https://github.com/asynchronics/nexosim-protocols/serial-port"
 version = "0.1.0"
 edition = "2024"
-description="""
+rust-version = "1.88.0"
+description = """
 Serial port model for NeXosim-based simulations.
 """
 categories = ["simulation", "aerospace", "science"]
@@ -47,6 +48,6 @@ tracing = { version = "0.1.40", default-features = false, features = [
 [dev-dependencies]
 nexosim-util = { workspace = true }
 nexosim-byte-utils = { path = "../byte-utils" }
-schematic = { workspace = true, features = [ "toml" ] }
-serialport = {version = "4.7", default-features = false}
+schematic = { workspace = true, features = ["toml"] }
+serialport = { version = "4.7", default-features = false }
 thread-guard = { workspace = true }

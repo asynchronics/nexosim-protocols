@@ -5,7 +5,6 @@
 use std::fmt;
 use std::io::{Error, ErrorKind, Result};
 use std::os::unix::{io::AsRawFd, prelude::RawFd};
-use std::time::Duration;
 
 use mio::event::Source;
 use mio::{Interest, Registry, Token, unix::SourceFd};
@@ -14,14 +13,16 @@ use schematic::Config;
 
 use serde::{Deserialize, Serialize};
 
-use socketcan::{BlockingCan, CanFrame, CanSocket, Error as CanError, Socket};
+use socketcan::{
+    BlockingCan, CanFrame, CanSocket, EmbeddedFrame, Error as CanError, Frame, Socket,
+};
 
 #[cfg(feature = "tracing")]
 use tracing::info;
 
-use nexosim::model::{self, BuildContext, Context, InitializedModel, ProtoModel};
+use nexosim::model::{self, BuildContext, Context, ProtoModel};
+use nexosim::model::{Model, schedulable};
 use nexosim::ports::Output;
-use nexosim::{Model, schedulable};
 
 use nexosim_io_utils::port::{IoPort, IoThread};
 
@@ -73,17 +74,6 @@ pub struct CanPortConfig {
     /// List of CAN interfaces.
     #[setting(default = vec!["vcan0".into(), "vcan1".into()])]
     pub interfaces: Vec<String>,
-
-    /// Time shift for scheduling events at the present moment.
-    ///
-    /// If no value is provided, `period` is used.
-    pub delta: Option<u64>,
-
-    /// Activation period for cyclic activities inside the simulation.
-    ///
-    /// If no value is provided, cyclic activities are not scheduled
-    /// automatically.
-    pub period: Option<u64>,
 }
 
 /// CAN data exchanged inside the simulation.
@@ -115,7 +105,7 @@ impl CanPortInner {
     }
 }
 
-impl IoPort<MioSocket<CanSocket>, CanData, CanData> for CanPortInner {
+impl IoPort<MioSocket<CanSocket>, SerializableCanData, CanData> for CanPortInner {
     fn register(&mut self, registry: &Registry) -> Token {
         for (i, socket) in self.sockets.iter_mut().enumerate() {
             registry
@@ -125,14 +115,17 @@ impl IoPort<MioSocket<CanSocket>, CanData, CanData> for CanPortInner {
         Token(self.sockets.len())
     }
 
-    fn read(&mut self, token: Token) -> Result<CanData> {
+    fn read(&mut self, token: Token) -> Result<SerializableCanData> {
         let Token(i) = token;
         self.sockets.get(i).map_or(
             Err(Error::new(ErrorKind::InvalidInput, "Unknown event.")),
             |socket| {
-                socket.get_ref().read_frame().map(|frame| CanData {
-                    interface: i,
-                    frame,
+                socket.get_ref().read_frame().map(|frame| {
+                    CanData {
+                        interface: i,
+                        frame,
+                    }
+                    .into()
                 })
             },
         )
@@ -157,10 +150,11 @@ impl IoPort<MioSocket<CanSocket>, CanData, CanData> for CanPortInner {
 /// CAN port model environment.
 pub struct CanPortEnv {
     /// Model instance configuration.
+    #[cfg(feature = "tracing")]
     config: CanPortConfig,
 
     /// I/O thread.
-    io_thread: IoThread<CanData, CanData>,
+    io_thread: IoThread<CanData>,
 }
 
 impl fmt::Debug for CanPortEnv {
@@ -194,7 +188,7 @@ impl ProtoModel for ProtoCanPort {
 
     fn build(
         self,
-        _: &mut BuildContext<Self>,
+        cx: &mut BuildContext<Self>,
     ) -> (Self::Model, <Self::Model as model::Model>::Env) {
         let interfaces = CanPortInner::new(&self.config.interfaces);
 
@@ -203,8 +197,13 @@ impl ProtoModel for ProtoCanPort {
                 frame_out: self.frame_out,
             },
             CanPortEnv {
+                #[cfg(feature = "tracing")]
                 config: self.config,
-                io_thread: IoThread::new(interfaces),
+                io_thread: IoThread::new(
+                    interfaces,
+                    cx.injector(),
+                    *schedulable!(CanPort::frame_out),
+                ),
             },
         )
     }
@@ -225,60 +224,82 @@ impl fmt::Debug for ProtoCanPort {
 #[derive(Serialize, Deserialize)]
 pub struct CanPort {
     /// CAN frame -- output port.
-    pub frame_out: Output<CanData>,
+    frame_out: Output<CanData>,
 }
 
 #[Model(type Env = CanPortEnv)]
 impl CanPort {
-    /// Initializes CAN port model.
-    #[nexosim(init)]
-    async fn init(self, cx: &mut Context<Self>) -> InitializedModel<Self> {
-        if let Some(period) = cx.env().config.period {
-            let delta = match cx.env().config.delta {
-                Some(delta) => delta,
-                None => period,
-            };
-
-            cx.schedule_periodic_event(
-                Duration::from_millis(delta),
-                Duration::from_millis(period),
-                schedulable!(Self::update),
-                (),
-            )
-            .unwrap();
-        }
-
-        self.into()
-    }
-
     /// Transmits CAN frame -- input port.
-    pub fn frame_in(&mut self, data: CanData, cx: &mut Context<Self>) {
+    pub fn frame_in(&mut self, data: CanData, _: &Context<Self>, env: &mut CanPortEnv) {
         #[cfg(feature = "tracing")]
         info!(
-            "Will transmit CAN frame to the CAN interface {}: {:?}.",
-            cx.env().config.interfaces[data.interface],
-            data.frame
+            "Sending CAN frame to CAN interface {}: {:?}.",
+            env.config.interfaces[data.interface], data.frame
         );
-        cx.env().io_thread.send(data).unwrap();
+        env.io_thread.send(data).unwrap();
     }
 
-    /// Forwards the CAN frame received on the serial port.
+    /// Private port forwarding received CAN frames.
     #[nexosim(schedulable)]
-    pub async fn update(&mut self, _: (), cx: &mut Context<Self>) {
-        while let Ok(data) = cx.env().io_thread.try_recv() {
-            #[cfg(feature = "tracing")]
-            info!(
-                "Received CAN frame on the CAN interface {}: {:?}.",
-                cx.env().config.interfaces[data.interface],
-                data.frame
-            );
-            self.frame_out.send(data).await;
-        }
+    async fn frame_out(
+        &mut self,
+        data: SerializableCanData,
+        _: &Context<Self>,
+        #[cfg(feature = "tracing")] env: &mut CanPortEnv,
+    ) {
+        let data: CanData = data.into();
+
+        #[cfg(feature = "tracing")]
+        info!(
+            "Receiving CAN frame on CAN interface {}: {:?}.",
+            env.config.interfaces[data.interface], data.frame
+        );
+        self.frame_out.send(data).await;
     }
 }
 
 impl fmt::Debug for CanPort {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("CanPort").finish_non_exhaustive()
+    }
+}
+
+/// A workaround for the lack of `Serialize` and `Deserialize` implementations
+/// on `CanFrame`.
+///
+/// This may become unnecessary if/when NeXosim allows non-serializable event
+/// injection.
+#[derive(Copy, Clone, Default, Serialize, Deserialize)]
+struct SerializableCanData {
+    interface: usize,
+    can_id: u32,
+    can_len: usize,
+    can_data: [u8; 8],
+}
+
+impl From<CanData> for SerializableCanData {
+    fn from(data: CanData) -> Self {
+        let frame = data.frame;
+        let can_len = frame.len();
+        let mut can_data = [0u8; 8];
+        can_data[0..can_len].copy_from_slice(frame.data());
+
+        Self {
+            interface: data.interface,
+            can_id: frame.raw_id(),
+            can_len,
+            can_data,
+        }
+    }
+}
+
+impl From<SerializableCanData> for CanData {
+    fn from(data: SerializableCanData) -> Self {
+        let frame = CanFrame::from_raw_id(data.can_id, &data.can_data[0..data.can_len]).unwrap();
+
+        CanData {
+            interface: data.interface,
+            frame,
+        }
     }
 }
