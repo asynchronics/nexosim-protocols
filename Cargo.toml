@@ -12,7 +12,7 @@ resolver = "3"
 [workspace.dependencies]
 bytes = { version = "1.10", features = ["serde"] }
 mio = { version = "1", features = ["os-poll", "os-ext"] }
-nexosim = "1"
+nexosim = "1.0"
 nexosim-util = "0.2"
 tracing = { version = "0.1.40", default-features = false, features = ["std"] }
 schematic = "0.18"
