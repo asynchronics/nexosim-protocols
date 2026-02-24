@@ -24,7 +24,7 @@ derive = ["dep:nexosim-yamcs-derive"]
 [dependencies]
 bytes = { workspace = true }
 nexosim = { workspace = true }
-nexosim-yamcs-derive = { path = "../yamcs-derive", optional = true }
+nexosim-yamcs-derive = { version = "0.2.0", optional = true }
 prost = "0.13"
 schematic = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

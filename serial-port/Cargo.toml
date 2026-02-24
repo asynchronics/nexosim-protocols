@@ -40,14 +40,14 @@ serde = { workspace = true }
 mio = { workspace = true }
 mio-serial = "5"
 nexosim = { workspace = true }
-nexosim-io-utils = { path = "../io-utils" }
+nexosim-io-utils = { version = "0.2.0" }
 tracing = { version = "0.1.40", default-features = false, features = [
     "std",
 ], optional = true }
 
 [dev-dependencies]
 nexosim-util = { workspace = true }
-nexosim-byte-utils = { path = "../byte-utils" }
+nexosim-byte-utils = { path = "0.2.0" }
 schematic = { workspace = true, features = ["toml"] }
 serialport = { version = "4.7", default-features = false }
 thread-guard = { workspace = true }

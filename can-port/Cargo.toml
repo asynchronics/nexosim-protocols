@@ -36,7 +36,7 @@ tracing = ["dep:tracing", "nexosim/tracing"]
 [dependencies]
 mio = { version = "1.0", features = ["os-poll", "os-ext"] }
 nexosim = { workspace = true }
-nexosim-io-utils = { path = "../io-utils" }
+nexosim-io-utils = { version = "0.2.0" }
 serde = { workspace = true }
 schematic = { workspace = true }
 socketcan = { version = "3.3" }
