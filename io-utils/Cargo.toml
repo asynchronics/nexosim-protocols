@@ -13,21 +13,18 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/asynchronics/nexosim-protocols"
 readme = "README.md"
 homepage = "https://github.com/asynchronics/nexosim-protocols/io-utils"
-version = "0.1.0-alpha.1"
+version = "0.2.0"
 edition = "2024"
-description="""
+rust-version = "1.88.0"
+description = """
 I/O utilities for NeXosim-based simulations.
 """
 categories = ["simulation", "aerospace", "science"]
-keywords = [
-    "simulation",
-    "discrete-event",
-    "systems",
-    "real-time",
-    "stream",
-]
+keywords = ["simulation", "discrete-event", "systems", "real-time", "stream"]
 
 [dependencies]
 bytes = { workspace = true }
+nexosim = { workspace = true }
 mio = { workspace = true, features = ["net"] }
+serde = { workspace = true }
 thread-guard = { workspace = true }

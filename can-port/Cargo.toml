@@ -13,9 +13,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/asynchronics/nexosim-protocols"
 readme = "README.md"
 homepage = "https://github.com/asynchronics/nexosim-protocols/can-port"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description="""
+rust-version = "1.88.0"
+description = """
 CAN port model for NeXosim-based simulations.
 """
 categories = ["simulation", "aerospace", "science"]
@@ -45,6 +46,6 @@ tracing = { version = "0.1.40", default-features = false, features = [
 
 [dev-dependencies]
 nexosim-util = { workspace = true }
-schematic = { workspace = true, features = [ "toml" ] }
+schematic = { workspace = true, features = ["toml"] }
 thread-guard = { workspace = true }
 tracing-subscriber = "0.3"

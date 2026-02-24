@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use nexosim::model::SchedulableId;
+use nexosim::simulation::ModelInjector;
 use prost::Message as _;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpSocket, tcp};
@@ -15,7 +17,7 @@ use tracing::{Instrument, info, info_span, warn};
 
 use crate::codegen::ygw;
 use crate::yamcs_value::{EncodedYamcsValue, monotonic_time_to_timestamp};
-use crate::{MsgFromYamcs, StampedMsgToYamcs};
+use crate::{MsgFromYamcs, StampedMsgToYamcs, YamcsBridge};
 
 const YGW_VERSION: u8 = 0;
 const YGW_SIMULATOR_NODE_ID: u32 = 0;
@@ -149,7 +151,8 @@ impl Registry {
 pub(crate) fn start(
     param_definitions: Vec<ygw::ParameterDefinition>,
     param_values: Vec<EncodedYamcsValue>,
-    gateway_tx: mpsc::UnboundedSender<MsgFromYamcs>,
+    injector_tx: ModelInjector<YamcsBridge>,
+    schedulable_tx: SchedulableId<YamcsBridge, MsgFromYamcs>,
     gateway_rx: mpsc::UnboundedReceiver<StampedMsgToYamcs>,
     port: u16,
 ) -> io::Result<()> {
@@ -179,7 +182,8 @@ pub(crate) fn start(
                     registry.clone(),
                     connection_tx.clone(),
                     listener,
-                    gateway_tx,
+                    injector_tx,
+                    schedulable_tx,
                 )
                 .instrument(info_span!("Yamcs bridge connection listener")),
             );
@@ -202,7 +206,8 @@ async fn accept_connection(
     registry: Registry,
     connection_tx: broadcast::Sender<(Bytes, u64)>,
     listener: TcpListener,
-    gateway_tx: mpsc::UnboundedSender<MsgFromYamcs>,
+    injector_tx: ModelInjector<YamcsBridge>,
+    schedulable_tx: SchedulableId<YamcsBridge, MsgFromYamcs>,
 ) -> Result<(), io::Error> {
     // Parameter definitions are immutable so they are serialized ahead of time.
     let serialized_param_definition_list = {
@@ -297,8 +302,13 @@ async fn accept_connection(
         // Start regular I/O.
         let (data_in_reader, data_in_writer) = data_counter_handles();
         tokio::spawn(
-            socket_reader(read_socket, gateway_tx.clone(), data_in_writer)
-                .instrument(info_span!("Yamcs bridge socket reader")),
+            socket_reader(
+                read_socket,
+                injector_tx.clone(),
+                schedulable_tx,
+                data_in_writer,
+            )
+            .instrument(info_span!("Yamcs bridge socket reader")),
         );
         tokio::spawn(
             socket_writer(
@@ -340,7 +350,8 @@ async fn broadcast_to_yamcs(
 /// too.
 async fn socket_reader(
     read_socket: tcp::OwnedReadHalf,
-    gateway_tx: mpsc::UnboundedSender<MsgFromYamcs>,
+    injector_tx: ModelInjector<YamcsBridge>,
+    schedulable_tx: SchedulableId<YamcsBridge, MsgFromYamcs>,
     mut data_in_writer: DataCounterWriter,
 ) {
     let mut stream = FramedRead::new(read_socket, LengthDelimitedCodec::new());
@@ -377,11 +388,7 @@ async fn socket_reader(
                                 }
                             };
 
-                            if gateway_tx.send(value).is_err() {
-                                info!("The Yamcs bridge is no longer reachable");
-
-                                return;
-                            }
+                            injector_tx.inject_event(&schedulable_tx, value);
                         }
                     }
 

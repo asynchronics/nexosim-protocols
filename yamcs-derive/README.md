@@ -10,7 +10,7 @@ This crate is not meant to be used directly. Instead, you should activate the
 
 ```toml
 [dependencies]
-nexosim-yamcs-bridge = { version = "0.1.0", features = ["derive"] }
+nexosim-yamcs-bridge = { version = "0.2.0", features = ["derive"] }
 ```
 
 The use of this macro is [documented in the `nexosim-yamcs-bridge`][NYG] crate.

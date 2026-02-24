@@ -9,19 +9,17 @@
 //! [`IoThread`]. This is a thread guard that spawns a thread in its constructor
 //! and joins it in the destructor.
 //!
-//! The [`IoThread`] structure provides two methods to communicate with the
-//! external thread from the model:
+//! [`IoThread`] provides the [`IoThread::send`] to send data to the background
+//! thread. It automatically forwards data received from the background thread
+//! to the model which injector is specified at construction.
 //!
-//! * [`IoThread::try_recv`] that tries to receive data from the external port,
-//! * [`IoThread::send`] that sends data to the external port.
-//!
-//! The [`IoThread`] constructor accepts an implementor of the [`IoPort`]
-//! trait. This trait allows registering of the I/O port in MIO and
-//! reading/writing data.
+//! The [`IoThread`] constructor accepts an implementor of the [`IoPort`] trait.
+//! This trait enables the registration of I/O ports and manages communication
+//! with them.
 //!
 //! #### Examples
 //!
-//! I/O port that uses UDP for communication with the external world:
+//! An I/O port that uses UDP for communication with the external world:
 //!
 //! ```
 //! use std::io::{ErrorKind, Result as IoResult};
@@ -86,7 +84,7 @@
 //!             if len != data.bytes.len() {
 //!                 Err(std::io::Error::other(
 //!                     format!(
-//!                         "Not all bytes written: had to write {}, but wrote {}.",
+//!                         "Only {} bytes of {} have been written.",
 //!                         data.bytes.len(),
 //!                         len
 //!                     ),
@@ -102,16 +100,18 @@
 use std::error::Error;
 use std::fmt;
 use std::io::{ErrorKind, Result as IoResult};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{
-    channel, Receiver, RecvError as MpscRecvError, SendError as MpscSendError, Sender,
-    TryRecvError as MpscTryRecvError,
+    RecvError as MpscRecvError, SendError as MpscSendError, Sender,
+    TryRecvError as MpscTryRecvError, channel,
 };
-use std::sync::Arc;
 use std::thread;
 
 use mio::event::Source;
 use mio::{Events, Poll, Registry, Token, Waker};
+use nexosim::model::{Model, SchedulableId};
+use nexosim::simulation::ModelInjector;
 
 use thread_guard::ThreadGuard;
 
@@ -180,7 +180,7 @@ pub enum TryRecvError {
     /// No data, would block.
     Empty,
 
-    /// Sender end is disconnected.
+    /// The sender end is disconnected.
     Disconnected,
 }
 
@@ -223,36 +223,36 @@ impl fmt::Display for RecvError {
 impl Error for RecvError {}
 
 /// I/O thread.
-pub struct IoThread<R, T>
+pub struct IoThread<T>
 where
-    R: Send,
     T: Send,
 {
     /// I/O thread guard.
     _io_thread: ThreadGuard<()>,
 
-    /// Data receiver.
-    receiver: Receiver<R>,
-
-    /// Data sender.
+    /// Sender to be used by the model.
     transmitter: Sender<T>,
 
     /// Thread waker.
     waker: Arc<Waker>,
 }
 
-impl<R, T> IoThread<R, T>
+impl<T> IoThread<T>
 where
-    R: Send + 'static,
     T: Send + 'static,
 {
-    /// Creates new I/O thread.
-    pub fn new<S, P>(mut port: P) -> Self
+    /// Creates a new I/O thread.
+    pub fn new<S, P, R, M>(
+        mut port: P,
+        injector: ModelInjector<M>,
+        schedulable: SchedulableId<M, R>,
+    ) -> Self
     where
         S: Source + ?Sized,
         P: IoPort<S, R, T> + Send + 'static,
+        R: Clone + Send + 'static,
+        M: Model,
     {
-        let (tx, receiver) = channel();
         let (transmitter, rx) = channel();
 
         let is_halted = Arc::new(AtomicBool::new(false));
@@ -284,11 +284,7 @@ where
                     } else {
                         loop {
                             match port.read(token) {
-                                Ok(message) => {
-                                    if tx.send(message).is_err() {
-                                        break 'poll;
-                                    }
-                                }
+                                Ok(message) => injector.inject_event(&schedulable, message),
                                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                                     break;
                                 }
@@ -304,31 +300,19 @@ where
             _io_thread: ThreadGuard::with_pre_action(io_thread, move |_| {
                 guard_is_halted.store(true, Ordering::Relaxed);
                 let _ = guard_waker.wake();
-                // Waker shall live long enough, otherwise the wake signal would
-                // not be delivered. A clone is stored in the parent structure,
-                // but to avoid issues when code is changed we return waker to
-                // the caller. Otherwise a change of fields order or removing of
-                // the `waker` in the `IoThread` structure would impact the
-                // waking mechanism.
+                // The waker must live long enough for the wake signal to be
+                // delivered. Event though a clone is stored in the parent
+                // structure, a waker is also returned to the caller to be more
+                // resilient towards modifications of the code. Otherwise, the
+                // fields order could impact the waking mechanism.
                 guard_waker
             }),
-            receiver,
             transmitter,
             waker,
         }
     }
 
-    /// Tries to receives data from I/O thread.
-    pub fn try_recv(&self) -> Result<R, TryRecvError> {
-        Ok(self.receiver.try_recv()?)
-    }
-
-    /// Blocks on receiving data from I/O thread.
-    pub fn recv(&self) -> Result<R, RecvError> {
-        Ok(self.receiver.recv()?)
-    }
-
-    /// Sends data to I/O thread.
+    /// Sends data to the I/O thread.
     pub fn send(&mut self, data: T) -> Result<(), SendError> {
         self.transmitter.send(data)?;
         self.waker.wake()?;
@@ -336,9 +320,8 @@ where
     }
 }
 
-impl<R, T> fmt::Debug for IoThread<R, T>
+impl<T> fmt::Debug for IoThread<T>
 where
-    R: Send,
     T: Send,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

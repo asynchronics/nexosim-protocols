@@ -19,7 +19,6 @@ to run on a different port.
 [YAMCS]: https://yamcs.org
 [YGW]: https://github.com/xpromache/yamcs-gateway
 
-
 ## Ports
 
 ```text
@@ -32,39 +31,31 @@ to run on a different port.
                     └─────────────┘
 ```
 
-
 ### Input ports
 
-| Name                | Event type   | Description                                                        |
-|---------------------|--------------|--------------------------------------------------------------------|
-| `to_yamcs`          | `MsgToYamcs` | A parameter update sent to Yamcs                                   |
-| `update_from_yamcs` | `()`         | Triggers the propagation of all queued Yamcs updates to the models |
-
+| Name       | Event type   | Description                      |
+| ---------- | ------------ | -------------------------------- |
+| `to_yamcs` | `MsgToYamcs` | A parameter update sent to Yamcs |
 
 ### Requestor ports
 
 | Name         | Request type   | Reply type   | Description                           |
-|--------------|----------------|--------------|---------------------------------------|
+| ------------ | -------------- | ------------ | ------------------------------------- |
 | `from_yamcs` | `MsgFromYamcs` | `MsgToYamcs` | A parameter update request from Yamcs |
-
 
 ## Configuration
 
 `YamcsBridge` uses the [`schematic`][schematic] crate for configuration.
 
-It is in particular possible to require that the `update_from_yamcs` port be
-automatically scheduled at regular intervals to ensure that parameter update
-requests from Yamcs are [regularly served](#scheduling-of-update_from_yamcs).
-
+At the moment, the only configurable parameter is the port on which the server
+runs.
 
 [schematic]: https://moonrepo.github.io/schematic/
 [toml_config]: config_templates/yamcs_config.toml
 
-
 ## Supported Yamcs parameters
 
 The bridge allows other models to send and receive parameters to/from Yamcs.
-
 
 ### Basic parameters
 
@@ -73,29 +64,27 @@ YGW mission database are supported and mapped to Rust types. Specifically, the
 following Rust types implement both the `YamcsValue` and the `BasicYamcsValue`
 trait:
 
-| Rust type                    | YGW type name | Yamcs data type             |
-|------------------------------|---------------|-----------------------------|
-| `bool`                       | `boolean`     | `BooleanParameterType`      |
-| `i32`                        | `sint32`      | `IntegerParameterType`      |
-| `u32`                        | `uint32`      | `IntegerParameterType`      |
-| `i64`                        | `sint64`      | `IntegerParameterType`      |
-| `u64`                        | `uint64`      | `IntegerParameterType`      |
-| `f32`                        | `float`       | `FloatParameterType`        |
-| `f64`                        | `double`      | `FloatParameterType`        |
-| `String`                     | `string`      | `StringParameterType`       |
-| `bytes::Bytes`               | `binary`      | `BinaryParameterType`       |
-| `nexosim::MonotonicTime`     | `timestamp`   | `AbsoluteTimeParameterType` |
-
+| Rust type                | YGW type name | Yamcs data type             |
+| ------------------------ | ------------- | --------------------------- |
+| `bool`                   | `boolean`     | `BooleanParameterType`      |
+| `i32`                    | `sint32`      | `IntegerParameterType`      |
+| `u32`                    | `uint32`      | `IntegerParameterType`      |
+| `i64`                    | `sint64`      | `IntegerParameterType`      |
+| `u64`                    | `uint64`      | `IntegerParameterType`      |
+| `f32`                    | `float`       | `FloatParameterType`        |
+| `f64`                    | `double`      | `FloatParameterType`        |
+| `String`                 | `string`      | `StringParameterType`       |
+| `bytes::Bytes`           | `binary`      | `BinaryParameterType`       |
+| `nexosim::MonotonicTime` | `timestamp`   | `AbsoluteTimeParameterType` |
 
 **Notes:**
 
-- The `Vec<u8>` type is *not* mapped to the Yamcs Gateway `binary` type because
+- The `Vec<u8>` type is _not_ mapped to the Yamcs Gateway `binary` type because
   this would conflict with the [automatic implementation](#custom-parameters) of
   `YamcsValue` for `Vec<T>`, which maps `Vec<T>` to arrays.
 - Timestamp mapping is not one-to-one: compared to the Yamcs Gateway
   `timestamp` type, the `nexosim::MonotonicTime` covers a wider time span
   but is restricted to nanosecond precision.
-
 
 ### Custom parameters
 
@@ -103,7 +92,7 @@ Additionally, most user-defined Yamcs data types can be mapped to Rust types
 that implement the `YamcsValue` trait, which includes:
 
 | Rust type                      | Yamcs data type           | Requires `#derive[YamcsValue]` | Comment                                   |
-|--------------------------------|---------------------------|--------------------------------|-------------------------------------------|
+| ------------------------------ | ------------------------- | ------------------------------ | ----------------------------------------- |
 | `i8`                           | `IntegerParameterType`    | No                             | Mapped to `i32` at the YGW protocol level |
 | `u8`                           | `IntegerParameterType`    | No                             | Mapped to `u32` at the YGW protocol level |
 | `i16`                          | `IntegerParameterType`    | No                             | Mapped to `i32` at the YGW protocol level |
@@ -133,7 +122,7 @@ activating the `derive` feature in the `yamcs-model` dependency:
 
 ```toml
 [dependencies]
-nexosim-yamcs-bridge = { version = "0.1.0", features = ["derive"] }
+nexosim-yamcs-bridge = { version = "0.2.0", features = ["derive"] }
 ```
 
 The derive macro can then be used as follows:
@@ -141,7 +130,6 @@ The derive macro can then be used as follows:
 ```rust
 use nexosim_yamcs_bridge::YamcsValue;
 
-# #[cfg(feature = "derive")]
 #[derive(Clone, YamcsValue)]
 struct MyCustomParam {
     some_field: String,
@@ -149,9 +137,7 @@ struct MyCustomParam {
 }
 ```
 
-
 ## Parameter registration
-
 
 ### Overview
 
@@ -172,7 +158,6 @@ trait. These methods take an additional `ptype` argument which must correspond
 to the path to a type defined in the database. In general, this path should be
 fully qualified and start at the relevant space system root, e.g.
 `/my_space_system/my_ptype`.
-
 
 ### Read-only parameters
 
@@ -195,46 +180,39 @@ read-only parameter, connected to the Yamcs bridge:
 This bench could be implemented as follows:
 
 ```rust
-use schematic::{ConfigLoader, Format};
+use schematic::ConfigLoader;
 
 use serde::{Deserialize, Serialize};
 
-use nexosim::Model;
+use nexosim::model::Model;
 use nexosim::ports::Output;
 use nexosim::simulation::Mailbox;
 
 use nexosim_yamcs_bridge::{ProtoYamcsBridge, YamcsBridge, YamcsConfig, YamcsValue};
 
-# #[cfg(feature = "derive")]
 #[derive(Clone, Default, YamcsValue)]
 struct MyParam {
     foo: i32,
     bar: f64,
 }
 
-# #[cfg(feature = "derive")]
 #[derive(Default, Serialize, Deserialize)]
 struct MyModel {
     pub param_out: Output<MyParam>,
     // ...
 }
-# #[cfg(feature = "derive")]
 #[Model]
 impl MyModel {
     // ...
 }
 
-// Load default configuration:
-// - server at port 7897,
-// - no auto-scheduling of `YamcsBridge::update_from_yamcs`.
+// Load default configuration (server at port 7897).
 let cfg = ConfigLoader::<YamcsConfig>::new().load().unwrap().config;
 
 // Register our parameter.
 let mut yamcs = ProtoYamcsBridge::new(cfg);
-# #[cfg(feature = "derive")]
 let mut model = MyModel::default();
 
-# #[cfg(feature = "derive")]
 let route_from_model = yamcs
     .register_custom_read_only_parameter(
         // the initial value (mostly irrelevant if propagated in the `Model::init` method):
@@ -251,10 +229,8 @@ let route_from_model = yamcs
     .unwrap();
 
 // Connect our model.
-# #[cfg(feature = "derive")]
 let yamcs_mbox = Mailbox::new();
 
-# #[cfg(feature = "derive")]
 model.param_out.map_connect(
     route_from_model,
     YamcsBridge::to_yamcs,
@@ -291,18 +267,17 @@ defined in the database. This could be done for instance by adding a file
 This file needs to be identified under the `mdb` option in the appropriate
 `etc/yamcs.[instance].yaml` configuration file.
 
-
 ### Read-write parameters
 
 `ProtoYamcsBridge::register_parameter` and
 `ProtoYamcsBridge::register_custom_parameter` return 3 routing functions:
 
-1) one function to be used as argument to `Output::map_connect` to route the
+1. one function to be used as argument to `Output::map_connect` to route the
    parameter from the model to the `to_yamcs` port of the Yamcs bridge,
-2) one function to be used as the first argument to
+2. one function to be used as the first argument to
    `Requestor::filter_map_connect` to route the parameter from the `from_yamcs`
    requestor port to the relevant model parameter setter,
-3) one function to be used as the second argument to
+3. one function to be used as the second argument to
    `Requestor::filter_map_connect` to route back the acknowledgement of the
    Yamcs parameter setting request.
 
@@ -325,14 +300,12 @@ to Yamcs and one to receive parameter modification requests from Yamcs.
 This bench could be implemented as follows:
 
 ```rust
-use schematic::{ConfigLoader, Format};
-
+use schematic::ConfigLoader;
 use serde::{Deserialize, Serialize};
 
-use nexosim::Model;
+use nexosim::model::Model;
 use nexosim::ports::Output;
 use nexosim::simulation::Mailbox;
-use nexosim::time::MonotonicTime;
 
 use nexosim_yamcs_bridge::{ProtoYamcsBridge, YamcsBridge, YamcsConfig};
 
@@ -389,36 +362,12 @@ yamcs.from_yamcs.filter_map_connect(
 As earlier, simulation timestamps are automatically appended to any parameter
 sent to Yamcs, including when acknowledging a parameter modification request.
 
+## Updates from Yamcs
 
-## Scheduling of `update_from_yamcs`
-
-Parameter updates are only propagated to connected models by the `from_yamcs`
-port when the `update_from_yamcs` port is triggered. Therefore, the
-`update_from_yamcs` port must be scheduled regularly to prevent the simulation
-from lagging behind Yamcs requests.
-
-Since parameter modifications request from Yamcs are typically triggered by a
-human operator, an update period of the order of one second or a few tenth of
-seconds is usually sufficient.
-
-Calls to `update_from_yamcs` can be scheduled explicitly using the
-`Scheduler::schedule_periodic_event` method, or can be delegated to the
-`Model::init` method of `YamcBridge`. The latter usage is illustrated by the
-below example where the model is configured to call `update_from_yamcs` every
-500ms (the configuration could be of course loaded from a file instead):
-
-```rust
-use schematic::{ConfigLoader, Format};
-use nexosim_yamcs_bridge::{ProtoYamcsBridge, YamcsConfig};
-
-let mut cfg_loader = ConfigLoader::<YamcsConfig>::new();
-cfg_loader
-    .code(format!("period = {}", 500), Format::Toml)
-    .unwrap();
-let cfg = cfg_loader.load().unwrap().config;
-
-let mut yamcs = ProtoYamcsBridge::new(cfg);
-```
+Parameter updates from Yamcs are serviced by the model at each simulation tick.
+It is therefore necessary for the simulation to run with a
+`nexosim::time::Ticker` to ensure that parameter updates are processed
+regularly.
 
 ## Examples
 

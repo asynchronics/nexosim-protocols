@@ -4,7 +4,6 @@
 
 use std::fmt;
 use std::io::{ErrorKind, Read, Result as IoResult, Write};
-use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 
@@ -18,9 +17,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "tracing")]
 use tracing::info;
 
-use nexosim::model::{self, Context, InitializedModel, ProtoModel};
+use nexosim::model::{self, Context, Model, ProtoModel, schedulable};
 use nexosim::ports::Output;
-use nexosim::{Model, schedulable};
 
 use nexosim_io_utils::port::{IoPort, IoThread};
 
@@ -42,18 +40,6 @@ pub struct SerialPortConfig {
     /// size.
     #[setting(default = 256)]
     pub buffer_size: usize,
-
-    /// Delay for the first scheduled data forwarding, in milliseconds.
-    ///
-    /// If no value is provided, `period` is used.
-    pub delta: Option<u64>,
-
-    /// Period at which data from the serial port is forwarded into the
-    /// simulation, in milliseconds.
-    ///
-    /// If no value is provided, periodic activities are not scheduled
-    /// automatically.
-    pub period: Option<u64>,
 }
 
 /// Inner implementation of I/O port.
@@ -115,10 +101,11 @@ impl IoPort<SerialStream, Bytes, Bytes> for SerialPortInner {
 /// Serial port model environment.
 pub struct SerialPortEnv {
     /// Model instance configuration.
+    #[cfg(feature = "tracing")]
     config: SerialPortConfig,
 
     /// I/O thread.
-    io_thread: IoThread<Bytes, Bytes>,
+    io_thread: IoThread<Bytes>,
 }
 
 impl fmt::Debug for SerialPortEnv {
@@ -151,7 +138,7 @@ impl ProtoModel for ProtoSerialPort {
 
     fn build(
         self,
-        _: &mut nexosim::model::BuildContext<Self>,
+        cx: &mut nexosim::model::BuildContext<Self>,
     ) -> (Self::Model, <Self::Model as model::Model>::Env) {
         let port = SerialPortInner::new(
             &self.config.port_path,
@@ -164,8 +151,9 @@ impl ProtoModel for ProtoSerialPort {
                 bytes_out: self.bytes_out,
             },
             SerialPortEnv {
+                #[cfg(feature = "tracing")]
                 config: self.config,
-                io_thread: IoThread::new(port),
+                io_thread: IoThread::new(port, cx.injector(), *schedulable!(SerialPort::bytes_out)),
             },
         )
     }
@@ -180,60 +168,42 @@ impl fmt::Debug for ProtoSerialPort {
 /// Serial port model.
 ///
 /// This model:
+///
 /// * listens to the configured serial port and forwards its data to the model
 ///   output,
 /// * forwards data from the model input to the serial port.
 #[derive(Serialize, Deserialize)]
 pub struct SerialPort {
     /// Data from serial port -- output port.
-    pub bytes_out: Output<Bytes>,
+    bytes_out: Output<Bytes>,
 }
 
 #[Model(type Env = SerialPortEnv)]
 impl SerialPort {
-    /// Initializes serial port model.
-    #[nexosim(init)]
-    async fn init(self, cx: &mut Context<Self>) -> InitializedModel<Self> {
-        if let Some(period) = cx.env().config.period {
-            let delta = match cx.env().config.delta {
-                Some(delta) => delta,
-                None => period,
-            };
-            cx.schedule_periodic_event(
-                Duration::from_millis(delta),
-                Duration::from_millis(period),
-                schedulable!(Self::update),
-                (),
-            )
-            .unwrap();
-        }
-
-        self.into()
-    }
-
     /// Sends raw bytes to the serial port -- input port.
-    pub async fn bytes_in(&mut self, data: Bytes, cx: &mut Context<Self>) {
+    pub async fn bytes_in(&mut self, data: Bytes, _: &Context<Self>, env: &mut SerialPortEnv) {
         #[cfg(feature = "tracing")]
         info!(
-            "Will send data to the serial port {}: {:X}.",
-            cx.env().config.port_path,
-            data
+            "Sending data to the serial port {}: {:X}.",
+            env.config.port_path, data
         );
-        cx.env().io_thread.send(data).unwrap();
+        env.io_thread.send(data).unwrap();
     }
 
-    /// Forwards the raw bytes received on the serial port.
+    /// Private port forwarding the raw bytes received on the serial port.
     #[nexosim(schedulable)]
-    pub async fn update(&mut self, _: (), cx: &mut Context<Self>) {
-        while let Ok(data) = cx.env().io_thread.try_recv() {
-            #[cfg(feature = "tracing")]
-            info!(
-                "Received data on the serial port {}: {:X}.",
-                cx.env().config.port_path,
-                data
-            );
-            self.bytes_out.send(data).await;
-        }
+    async fn bytes_out(
+        &mut self,
+        data: Bytes,
+        _: &Context<Self>,
+        #[cfg(feature = "tracing")] env: &mut SerialPortEnv,
+    ) {
+        #[cfg(feature = "tracing")]
+        info!(
+            "Receiving data from the serial port {}: {:X}.",
+            env.config.port_path, data
+        );
+        self.bytes_out.send(data).await;
     }
 }
 

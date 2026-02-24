@@ -34,10 +34,10 @@ use socketcan::{BlockingCan, CanFrame, CanSocket, EmbeddedFrame, Id, Socket, Sta
 use thread_guard::ThreadGuard;
 
 use nexosim::model::Context;
-use nexosim::ports::{EventQueue, Output};
+use nexosim::model::{Model, schedulable};
+use nexosim::ports::{EventSinkReader, EventSource, Output, SinkState, event_queue};
 use nexosim::simulation::{ExecutionError, Mailbox, SimInit, SimulationError};
-use nexosim::time::{AutoSystemClock, MonotonicTime};
-use nexosim::{Model, schedulable};
+use nexosim::time::{AutoSystemClock, MonotonicTime, PeriodicTicker};
 use nexosim_util::observable::Observable;
 
 use nexosim_can_port::{CanData, CanPort, CanPortConfig, ProtoCanPort};
@@ -47,19 +47,11 @@ use nexosim_can_port::{CanData, CanPort, CanPortConfig, ProtoCanPort};
 /// CAN interfaces.
 const CAN_INTERFACES: &[&str] = &["vcan0", "vcan1"];
 
-/// Reader timeout.
-const TIMEOUT: Duration = Duration::from_secs(5);
-
 /// Pulse data ID.
 const PULSE_ID: u16 = 0x100;
 
 /// Detection data ID.
 const STAT_ID: u16 = 0x200;
-
-/// Activation period, in milliseconds, for cyclic activities inside the simulation.
-const PERIOD: u64 = 10;
-/// Time shift, in milliseconds, for scheduling events at the present moment.
-const DELTA: u64 = 5;
 
 /// Counter switch on delay.
 const SWITCH_ON_DELAY: Duration = Duration::from_secs(1);
@@ -113,7 +105,7 @@ impl Counter {
     }
 
     /// Power -- input port.
-    pub async fn power_in(&mut self, on: bool, cx: &mut Context<Self>) {
+    pub async fn power_in(&mut self, on: bool, cx: &Context<Self>) {
         match *self.state {
             Mode::Off if on => cx
                 .schedule_event(SWITCH_ON_DELAY, schedulable!(Self::switch_on), ())
@@ -181,36 +173,39 @@ fn main() -> Result<(), SimulationError> {
 
     // Model handles for simulation.
     let counter_addr = counter_mbox.address();
-    let observer = EventQueue::new();
+    let (sink, mut observer) = event_queue(SinkState::Enabled);
     counter
         .mode
-        .map_connect_sink(|m| Event::Mode(*m), &observer);
-    counter
-        .count
-        .map_connect_sink(|c| Event::Count(*c), &observer);
-    let mut observer = observer.into_reader_with_timeout(TIMEOUT);
+        .map_connect_sink(|m| Event::Mode(*m), sink.clone());
+    counter.count.map_connect_sink(|c| Event::Count(*c), sink);
 
     // Start time (arbitrary since models do not depend on absolute time).
     let t0 = MonotonicTime::EPOCH;
 
     // Assembly and initialization.
-    let mut bench =
-        SimInit::new()
-            .add_model(can, can_mbox, "can")
-            .add_model(counter, counter_mbox, "counter");
+    let mut bench = SimInit::new();
 
-    let counter_id = bench.register_input(Counter::power_in, &counter_addr);
+    let counter_id = EventSource::new()
+        .connect(Counter::power_in, &counter_addr)
+        .register(&mut bench);
 
-    let mut simu = bench.set_clock(AutoSystemClock::new()).init(t0)?.0;
+    let mut simu = bench
+        .add_model(can, can_mbox, "can")
+        .add_model(counter, counter_mbox, "counter")
+        .with_clock(
+            AutoSystemClock::new(),
+            PeriodicTicker::new(Duration::from_millis(100)),
+        )
+        .init(t0)?;
+
     let scheduler = simu.scheduler();
-    let mut sim_scheduler = scheduler.clone();
+    let sim_scheduler = scheduler.clone();
 
     // Simulation thread.
     let simulation_handle = ThreadGuard::with_actions(
         thread::spawn(move || {
             // ---------- Simulation.  ----------
-            // Infinitely kept alive by the ticker model until halted.
-            simu.step_unbounded()
+            simu.run()
         }),
         move |_| {
             sim_scheduler.halt();
@@ -225,7 +220,7 @@ fn main() -> Result<(), SimulationError> {
 
     // Wait until counter mode is `On`.
     loop {
-        let event = observer.next();
+        let event = observer.read();
         match event {
             Some(Event::Mode(Mode::On)) => {
                 break;
@@ -293,7 +288,7 @@ fn main() -> Result<(), SimulationError> {
     // Wait until `N` detections.
     loop {
         // This call is blocking.
-        let event = observer.next();
+        let event = observer.read();
         match event {
             Some(Event::Count(c)) if c >= N => {
                 break;
@@ -323,12 +318,6 @@ fn get_can_port_cfg(interfaces: &[&str]) -> CanPortConfig {
     let mut loader = ConfigLoader::<CanPortConfig>::new();
     loader
         .code(format!("interfaces = {interfaces:?}"), Format::Toml)
-        .unwrap();
-    loader
-        .code(format!("delta = {DELTA}"), Format::Toml)
-        .unwrap();
-    loader
-        .code(format!("period = {PERIOD}"), Format::Toml)
         .unwrap();
     loader.load().unwrap().config
 }

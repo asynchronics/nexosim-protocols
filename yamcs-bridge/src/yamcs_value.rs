@@ -6,6 +6,7 @@ use std::fmt;
 use bytes::Bytes;
 
 use nexosim::time::MonotonicTime;
+use serde::{Deserialize, Serialize};
 
 use crate::codegen::ygw;
 
@@ -13,7 +14,7 @@ use crate::codegen::ygw;
 ///
 /// This is an intentionally opaque type that encodes a value according to the
 /// Yamcs gateway protocol.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EncodedYamcsValue(pub(crate) ygw::value::V);
 
 /// An error returned when decoding a [`YamcsValue`] fails.

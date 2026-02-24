@@ -31,11 +31,10 @@ use serde::{Deserialize, Serialize};
 
 use thread_guard::ThreadGuard;
 
-use nexosim::model::Context;
-use nexosim::ports::{EventQueue, Output};
+use nexosim::model::{Context, Model, schedulable};
+use nexosim::ports::{EventSinkReader, EventSource, Output, SinkState, event_queue};
 use nexosim::simulation::{ExecutionError, Mailbox, SimInit, SimulationError};
-use nexosim::time::{AutoSystemClock, MonotonicTime};
-use nexosim::{Model, schedulable};
+use nexosim::time::{AutoSystemClock, MonotonicTime, PeriodicTicker};
 use nexosim_util::observable::Observable;
 
 use nexosim_byte_utils::decode::{
@@ -49,13 +48,6 @@ use nexosim_serial_port::{ProtoSerialPort, SerialPort, SerialPortConfig};
 const INTERNAL_PORT_PATH: &str = "/tmp/ttyS20";
 /// Serial port used to send data.
 const EXTERNAL_PORT_PATH: &str = "/tmp/ttyS21";
-
-/// Activation period, in milliseconds, for cyclic activities inside the simulation.
-const PERIOD: u64 = 10;
-/// Time shift, in milliseconds, for scheduling events at the present moment.
-const DELTA: u64 = 5;
-/// Reader timeout.
-const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Counter switch on delay.
 const SWITCH_ON_DELAY: Duration = Duration::from_secs(1);
@@ -109,7 +101,7 @@ impl Counter {
     }
 
     /// Power -- input port.
-    pub async fn power_in(&mut self, on: bool, cx: &mut Context<Self>) {
+    pub async fn power_in(&mut self, on: bool, cx: &Context<Self>) {
         match *self.state {
             Mode::Off if on => cx
                 .schedule_event(SWITCH_ON_DELAY, schedulable!(Self::switch_on), ())
@@ -163,6 +155,9 @@ fn main() -> Result<(), SimulationError> {
     let decoder_mbox = Mailbox::new();
     let counter_mbox = Mailbox::new();
 
+    // Bench.
+    let mut bench = SimInit::new();
+
     // Connections.
     serial.bytes_out.connect(
         ByteDecoderModel::<(), ByteDelimitedDecoder<(), (), ()>>::bytes_in,
@@ -174,37 +169,38 @@ fn main() -> Result<(), SimulationError> {
         .map_connect(|c| (vec![*c]).into(), SerialPort::bytes_in, &serial_mbox);
 
     // Model handles for simulation.
-    let counter_addr = counter_mbox.address();
-    let observer = EventQueue::new();
+    let (sink, mut observer) = event_queue(SinkState::Enabled);
     counter
         .mode
-        .map_connect_sink(|m| Event::Mode(*m), &observer);
-    counter
-        .count
-        .map_connect_sink(|c| Event::Count(*c), &observer);
-    let mut observer = observer.into_reader_with_timeout(TIMEOUT);
+        .map_connect_sink(|m| Event::Mode(*m), sink.clone());
+    counter.count.map_connect_sink(|c| Event::Count(*c), sink);
+
+    let power_in = EventSource::new()
+        .connect(Counter::power_in, &counter_mbox)
+        .register(&mut bench);
 
     // Start time (arbitrary since models do not depend on absolute time).
     let t0 = MonotonicTime::EPOCH;
 
     // Assembly and initialization.
-    let mut bench = SimInit::new()
+    let mut simu = bench
         .add_model(serial, serial_mbox, "serial")
         .add_model(decoder, decoder_mbox, "decoder")
-        .add_model(counter, counter_mbox, "counter");
+        .add_model(counter, counter_mbox, "counter")
+        .with_clock(
+            AutoSystemClock::new(),
+            PeriodicTicker::new(Duration::from_millis(100)),
+        )
+        .init(t0)?;
 
-    let counter_id = bench.register_input(Counter::power_in, &counter_addr);
-    let mut simu = bench.set_clock(AutoSystemClock::new()).init(t0)?.0;
     let scheduler = simu.scheduler();
 
-    let mut sim_scheduler = scheduler.clone();
-
     // Simulation thread.
+    let sim_scheduler = scheduler.clone();
     let simulation_handle = ThreadGuard::with_actions(
         thread::spawn(move || {
             // ---------- Simulation.  ----------
-            // Infinitely kept alive by the ticker model until halted.
-            simu.step_unbounded()
+            simu.run()
         }),
         move |_| {
             sim_scheduler.halt();
@@ -215,11 +211,11 @@ fn main() -> Result<(), SimulationError> {
     );
 
     // Switch the counter on.
-    scheduler.schedule_event(Duration::from_millis(1), &counter_id, true)?;
+    scheduler.schedule_event(Duration::from_millis(1), &power_in, true)?;
 
     // Wait until counter mode is `On`.
     loop {
-        let event = observer.next();
+        let event = observer.read();
         match event {
             Some(Event::Mode(Mode::On)) => {
                 break;
@@ -269,10 +265,10 @@ fn main() -> Result<(), SimulationError> {
         }
     }));
 
-    // Wait until `N` detections.
+    // Wait for `N` detections.
     loop {
         // This call is blocking.
-        match observer.next() {
+        match observer.read() {
             Some(Event::Count(c)) if c >= N => {
                 break;
             }
@@ -300,12 +296,6 @@ fn get_serial_port_cfg(path: &str) -> SerialPortConfig {
     let mut loader = ConfigLoader::<SerialPortConfig>::new();
     loader
         .code(format!("portPath = \"{path}\""), Format::Toml)
-        .unwrap();
-    loader
-        .code(format!("delta = {DELTA}"), Format::Toml)
-        .unwrap();
-    loader
-        .code(format!("period = {PERIOD}"), Format::Toml)
         .unwrap();
     loader.load().unwrap().config
 }

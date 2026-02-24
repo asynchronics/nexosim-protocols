@@ -7,9 +7,10 @@ This crate contains CAN port model for [NeXosim][NX]-based simulations.
 ## Model overview
 
 This model
-* listens the specified CAN ports injecting data from it into the
+
+- listens the specified CAN ports injecting data from it into the
   simulation,
-* outputs data from the simulation to the specified CAN ports.
+- outputs data from the simulation to the specified CAN ports.
 
 **Note: data sent by the CAN port is injected back into the simulation.**
 
@@ -22,17 +23,18 @@ This model
             │           │
             └───────────┘
 ```
+
 ### Input ports
 
-| Name                | Event type   | Description                             |
-|---------------------|--------------|-----------------------------------------|
-| `frame_in`          | `CanData`    | CAN frame to be written to the CAN port |
+| Name       | Event type | Description                             |
+| ---------- | ---------- | --------------------------------------- |
+| `frame_in` | `CanData`  | CAN frame to be written to the CAN port |
 
-### Ouput ports
+### Output ports
 
-| Name                | Ouput type         | Description                      |
-|---------------------|--------------------|----------------------------------|
-| `frame_out`         | `CanData`          | CAN frame read from the CAN port |
+| Name        | Output type | Description                      |
+| ----------- | ----------- | -------------------------------- |
+| `frame_out` | `CanData`   | CAN frame read from the CAN port |
 
 ## Documentation
 
@@ -51,7 +53,7 @@ To use the latest version, add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-nexosim-can-port = "0.1.0"
+nexosim-can-port = "0.2.0"
 ```
 
 ## Configuration
@@ -70,21 +72,9 @@ use nexosim_can_port::{ProtoCanPort, CanPort, CanPortConfig};
 /// CAN interfaces.
 const CAN_INTERFACES: &[&str] = &["vcan0", "vcan1"];
 
-/// Activation period, in milliseconds, for cyclic activities inside the simulation.
-const PERIOD: u64 = 10;
-
-/// Time shift, in milliseconds, for scheduling events at the present moment.
-const DELTA: u64 = 5;
-
 let mut loader = ConfigLoader::<CanPortConfig>::new();
 loader
     .code(format!("interfaces = {:?}", CAN_INTERFACES), Format::Toml)
-    .unwrap();
-loader
-    .code(format!("delta = {}", DELTA), Format::Toml)
-    .unwrap();
-loader
-    .code(format!("period = {}", PERIOD), Format::Toml)
     .unwrap();
 let cfg = loader.load().unwrap().config;
 
@@ -95,7 +85,6 @@ let can = ProtoCanPort::new(cfg);
 
 This software is licensed under the [Apache License, Version 2.0](LICENSE-APACHE) or the
 [MIT license](LICENSE-MIT), at your option.
-
 
 ## Contribution
 
