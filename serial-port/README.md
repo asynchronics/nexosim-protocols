@@ -51,7 +51,7 @@ To use the latest version, add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-nexosim-serial-port = "0.1.0"
+nexosim-serial-port = "0.2.0"
 ```
 
 ## Configuration

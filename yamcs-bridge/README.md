@@ -122,7 +122,7 @@ activating the `derive` feature in the `yamcs-model` dependency:
 
 ```toml
 [dependencies]
-nexosim-yamcs-bridge = { version = "0.1.0", features = ["derive"] }
+nexosim-yamcs-bridge = { version = "0.2.0", features = ["derive"] }
 ```
 
 The derive macro can then be used as follows:

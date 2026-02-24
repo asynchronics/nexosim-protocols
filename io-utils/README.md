@@ -29,7 +29,7 @@ To use the latest version, add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-nexosim-io-utils = "0.1.0-alpha.1"
+nexosim-io-utils = "0.2.0"
 ```
 
 ## License
