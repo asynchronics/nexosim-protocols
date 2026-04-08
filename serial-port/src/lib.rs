@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs, missing_debug_implementations, unreachable_pub)]
 #![forbid(unsafe_code)]
+#![allow(deprecated)]
 
 use std::fmt;
 use std::io::{ErrorKind, Read, Result as IoResult, Write};
@@ -19,6 +20,7 @@ use tracing::info;
 
 use nexosim::model::{self, Context, Model, ProtoModel, schedulable};
 use nexosim::ports::Output;
+use nexosim::simulation::ModelInjector;
 
 use nexosim_io_utils::port::{IoPort, IoThread};
 
@@ -71,9 +73,16 @@ impl IoPort<SerialStream, Bytes, Bytes> for SerialPortInner {
 
     fn read(&mut self, token: Token) -> IoResult<Bytes> {
         if token == Token(0) {
-            self.port
-                .read(&mut self.buffer)
-                .map(|len| BytesMut::from(&self.buffer[..len]).into())
+            self.port.read(&mut self.buffer).map(|len| {
+                if len == 0 {
+                    // Serial port disappeared.
+                    return Err(std::io::Error::new(
+                        ErrorKind::UnexpectedEof,
+                        "End of file reached for Serial/TTY device.",
+                    ));
+                }
+                Ok(BytesMut::from(&self.buffer[..len]).into())
+            })?
         } else {
             // Unknown event: should never happen.
             Err(std::io::Error::new(
@@ -101,11 +110,13 @@ impl IoPort<SerialStream, Bytes, Bytes> for SerialPortInner {
 /// Serial port model environment.
 pub struct SerialPortEnv {
     /// Model instance configuration.
-    #[cfg(feature = "tracing")]
     config: SerialPortConfig,
 
+    /// Model injector.
+    injector: ModelInjector<SerialPort>,
+
     /// I/O thread.
-    io_thread: IoThread<Bytes>,
+    io_thread: Option<IoThread<Bytes>>,
 }
 
 impl fmt::Debug for SerialPortEnv {
@@ -119,6 +130,9 @@ pub struct ProtoSerialPort {
     /// Data from serial port -- output port.
     pub bytes_out: Output<Bytes>,
 
+    /// Disconnection event -- output port.
+    pub disconnected: Output<()>,
+
     /// Serial port model instance config.
     config: SerialPortConfig,
 }
@@ -129,6 +143,7 @@ impl ProtoSerialPort {
         Self {
             config,
             bytes_out: Output::new(),
+            disconnected: Output::new(),
         }
     }
 }
@@ -149,11 +164,17 @@ impl ProtoModel for ProtoSerialPort {
         (
             Self::Model {
                 bytes_out: self.bytes_out,
+                disconnected: self.disconnected,
             },
             SerialPortEnv {
-                #[cfg(feature = "tracing")]
                 config: self.config,
-                io_thread: IoThread::new(port, cx.injector(), *schedulable!(SerialPort::bytes_out)),
+                injector: cx.injector(),
+                io_thread: Some(IoThread::new(
+                    port,
+                    cx.injector(),
+                    *schedulable!(SerialPort::bytes_out),
+                    *schedulable!(SerialPort::disconnected),
+                )),
             },
         )
     }
@@ -176,6 +197,9 @@ impl fmt::Debug for ProtoSerialPort {
 pub struct SerialPort {
     /// Data from serial port -- output port.
     bytes_out: Output<Bytes>,
+
+    /// Disconnection event -- output port.
+    disconnected: Output<()>,
 }
 
 #[Model(type Env = SerialPortEnv)]
@@ -187,7 +211,25 @@ impl SerialPort {
             "Sending data to the serial port {}: {:X}.",
             env.config.port_path, data
         );
-        env.io_thread.send(data).unwrap();
+        if let Some(io_thread) = &mut env.io_thread {
+            io_thread.send(data).unwrap();
+        }
+    }
+
+    /// Reconnects serial interface.
+    pub async fn reconnect(&mut self, _: (), _: &Context<Self>, env: &mut SerialPortEnv) {
+        std::mem::drop(env.io_thread.take());
+        let port = SerialPortInner::new(
+            &env.config.port_path,
+            env.config.baud_rate,
+            env.config.buffer_size,
+        );
+        env.io_thread = Some(IoThread::new(
+            port,
+            env.injector.clone(),
+            *schedulable!(SerialPort::bytes_out),
+            *schedulable!(SerialPort::disconnected),
+        ));
     }
 
     /// Private port forwarding the raw bytes received on the serial port.
@@ -204,6 +246,19 @@ impl SerialPort {
             env.config.port_path, data
         );
         self.bytes_out.send(data).await;
+    }
+
+    /// Private port forwarding information on disconnection.
+    #[nexosim(schedulable)]
+    async fn disconnected(
+        &mut self,
+        _: (),
+        _: &Context<Self>,
+        #[cfg(feature = "tracing")] env: &mut SerialPortEnv,
+    ) {
+        #[cfg(feature = "tracing")]
+        info!("Serial port {} disconnected.", env.config.port_path);
+        self.disconnected.send(()).await;
     }
 }
 

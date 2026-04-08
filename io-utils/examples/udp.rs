@@ -3,6 +3,7 @@
 //!
 //! The example uses a loop-back with a 1s latency to demonstrate both writing
 //! and reading operations.
+#![allow(deprecated)]
 
 use std::error::Error;
 use std::net::SocketAddr;
@@ -53,7 +54,12 @@ impl UdpModelEnv {
         let udp = Udp::new(self_addr, BUF_SIZE);
 
         // The environment is a thread handling I/O operations in the background.
-        let io_thread = IoThread::new(udp, injector, *schedulable!(UdpModel::recv));
+        let io_thread = IoThread::new(
+            udp,
+            injector,
+            *schedulable!(UdpModel::recv),
+            *schedulable!(UdpModel::disconnected),
+        );
 
         Self {
             io_thread,
@@ -122,6 +128,10 @@ impl UdpModel {
         // Forward to output port.
         self.bytes.send(bytes).await;
     }
+
+    /// Private method, called when disconnected, we do nothing.
+    #[nexosim(schedulable)]
+    async fn disconnected(&mut self, _: ()) {}
 }
 
 /// Uses I/O thread to send data to echo UDP server.

@@ -96,6 +96,7 @@
 //!     }
 //! }
 //! ```
+#![allow(deprecated)]
 
 use std::error::Error;
 use std::fmt;
@@ -245,7 +246,8 @@ where
     pub fn new<S, P, R, M>(
         mut port: P,
         injector: ModelInjector<M>,
-        schedulable: SchedulableId<M, R>,
+        data_out: SchedulableId<M, R>,
+        disconnected: SchedulableId<M, ()>,
     ) -> Self
     where
         S: Source + ?Sized,
@@ -284,16 +286,21 @@ where
                     } else {
                         loop {
                             match port.read(token) {
-                                Ok(message) => injector.inject_event(&schedulable, message),
+                                Ok(message) => {
+                                    injector.inject_event(&data_out, message);
+                                }
                                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                                     break;
                                 }
-                                _ => break 'poll,
+                                Err(_) => {
+                                    break 'poll;
+                                }
                             }
                         }
                     }
                 }
             }
+            injector.inject_event(&disconnected, ());
         });
 
         Self {

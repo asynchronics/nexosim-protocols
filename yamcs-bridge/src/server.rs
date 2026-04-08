@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
