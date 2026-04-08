@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs, missing_debug_implementations, unreachable_pub)]
 #![forbid(unsafe_code)]
+#![allow(deprecated)]
 
 use std::fmt;
 use std::io::{Error, ErrorKind, Result};
@@ -23,6 +24,7 @@ use tracing::info;
 use nexosim::model::{self, BuildContext, Context, ProtoModel};
 use nexosim::model::{Model, schedulable};
 use nexosim::ports::Output;
+use nexosim::simulation::ModelInjector;
 
 use nexosim_io_utils::port::{IoPort, IoThread};
 
@@ -150,8 +152,10 @@ impl IoPort<MioSocket<CanSocket>, SerializableCanData, CanData> for CanPortInner
 /// CAN port model environment.
 pub struct CanPortEnv {
     /// Model instance configuration.
-    #[cfg(feature = "tracing")]
     config: CanPortConfig,
+
+    /// Model injector.
+    injector: ModelInjector<CanPort>,
 
     /// I/O thread.
     io_thread: IoThread<CanData>,
@@ -169,6 +173,9 @@ pub struct ProtoCanPort {
     /// Received CAN frames -- output port.
     pub frame_out: Output<CanData>,
 
+    /// Disconnection event -- output port.
+    pub disconnected: Output<()>,
+
     /// CAN port model instance configuration.
     config: CanPortConfig,
 }
@@ -178,6 +185,7 @@ impl ProtoCanPort {
     pub fn new(config: CanPortConfig) -> Self {
         Self {
             frame_out: Output::default(),
+            disconnected: Output::default(),
             config,
         }
     }
@@ -195,14 +203,16 @@ impl ProtoModel for ProtoCanPort {
         (
             Self::Model {
                 frame_out: self.frame_out,
+                disconnected: self.disconnected,
             },
             CanPortEnv {
-                #[cfg(feature = "tracing")]
                 config: self.config,
+                injector: cx.injector(),
                 io_thread: IoThread::new(
                     interfaces,
                     cx.injector(),
                     *schedulable!(CanPort::frame_out),
+                    *schedulable!(CanPort::disconnected),
                 ),
             },
         )
@@ -225,6 +235,9 @@ impl fmt::Debug for ProtoCanPort {
 pub struct CanPort {
     /// CAN frame -- output port.
     frame_out: Output<CanData>,
+
+    /// Disconnection event -- output port.
+    disconnected: Output<()>,
 }
 
 #[Model(type Env = CanPortEnv)]
@@ -237,6 +250,17 @@ impl CanPort {
             env.config.interfaces[data.interface], data.frame
         );
         env.io_thread.send(data).unwrap();
+    }
+
+    /// Reconnects CAN interface.
+    pub async fn reconnect(&mut self, _: (), _: &Context<Self>, env: &mut CanPortEnv) {
+        let interfaces = CanPortInner::new(&env.config.interfaces);
+        env.io_thread = IoThread::new(
+            interfaces,
+            env.injector.clone(),
+            *schedulable!(CanPort::frame_out),
+            *schedulable!(CanPort::disconnected),
+        );
     }
 
     /// Private port forwarding received CAN frames.
@@ -255,6 +279,14 @@ impl CanPort {
             env.config.interfaces[data.interface], data.frame
         );
         self.frame_out.send(data).await;
+    }
+
+    /// Private port forwarding disconnection event.
+    #[nexosim(schedulable)]
+    async fn disconnected(&mut self, _: (), _: &Context<Self>, _: &mut CanPortEnv) {
+        #[cfg(feature = "tracing")]
+        info!("CAN is disconnected.");
+        self.disconnected.send(()).await;
     }
 }
 
