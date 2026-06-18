@@ -31,7 +31,7 @@ keywords = [
 publish = ["nexosim"]
 
 [features]
-tracing = ["dep:tracing", "nexosim/tracing"]
+tracing = ["dep:tracing", "nexosim/tracing", "nexosim-io-utils/tracing"]
 
 [dependencies]
 bytes = { workspace = true }

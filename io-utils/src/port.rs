@@ -111,6 +111,10 @@ use std::thread;
 
 use mio::event::Source;
 use mio::{Events, Poll, Registry, Token, Waker};
+
+#[cfg(feature = "tracing")]
+use tracing::error;
+
 use nexosim::model::{Model, SchedulableId};
 use nexosim::simulation::ModelInjector;
 
@@ -270,7 +274,12 @@ where
             let mut events = Events::with_capacity(256);
             'poll: loop {
                 // This call is blocking.
-                poll.poll(&mut events, None).unwrap();
+                if let Err(err) = poll.poll(&mut events, None) {
+                    #[cfg(feature = "tracing")]
+                    error!("An error on poll occured: {:?}.", err);
+
+                    let _ = err;
+                }
 
                 for event in events.iter() {
                     let token = event.token();
