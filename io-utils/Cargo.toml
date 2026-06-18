@@ -22,9 +22,15 @@ I/O utilities for NeXosim-based simulations.
 categories = ["simulation", "aerospace", "science"]
 keywords = ["simulation", "discrete-event", "systems", "real-time", "stream"]
 
+[features]
+tracing = ["dep:tracing", "nexosim/tracing"]
+
 [dependencies]
 bytes = { workspace = true }
 nexosim = { workspace = true }
 mio = { workspace = true, features = ["net"] }
 serde = { workspace = true }
 thread-guard = { workspace = true }
+tracing = { version = "0.1.40", default-features = false, features = [
+    "std",
+], optional = true }

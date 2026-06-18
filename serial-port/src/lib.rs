@@ -16,7 +16,7 @@ use mio_serial::{SerialPortBuilderExt, SerialStream};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "tracing")]
-use tracing::info;
+use tracing::{debug, info};
 
 use nexosim::model::{self, Context, Model, ProtoModel, schedulable};
 use nexosim::ports::Output;
@@ -207,7 +207,7 @@ impl SerialPort {
     /// Sends raw bytes to the serial port -- input port.
     pub async fn bytes_in(&mut self, data: Bytes, _: &Context<Self>, env: &mut SerialPortEnv) {
         #[cfg(feature = "tracing")]
-        info!(
+        debug!(
             "Sending data to the serial port {}: {:X}.",
             env.config.port_path, data
         );
@@ -241,7 +241,7 @@ impl SerialPort {
         #[cfg(feature = "tracing")] env: &mut SerialPortEnv,
     ) {
         #[cfg(feature = "tracing")]
-        info!(
+        debug!(
             "Receiving data from the serial port {}: {:X}.",
             env.config.port_path, data
         );

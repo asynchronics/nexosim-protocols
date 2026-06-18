@@ -19,7 +19,7 @@ use socketcan::{
 };
 
 #[cfg(feature = "tracing")]
-use tracing::info;
+use tracing::{debug, info};
 
 use nexosim::model::{self, BuildContext, Context, ProtoModel};
 use nexosim::model::{Model, schedulable};
@@ -245,7 +245,7 @@ impl CanPort {
     /// Transmits CAN frame -- input port.
     pub fn frame_in(&mut self, data: CanData, _: &Context<Self>, env: &mut CanPortEnv) {
         #[cfg(feature = "tracing")]
-        info!(
+        debug!(
             "Sending CAN frame to CAN interface {}: {:?}.",
             env.config.interfaces[data.interface], data.frame
         );
@@ -274,7 +274,7 @@ impl CanPort {
         let data: CanData = data.into();
 
         #[cfg(feature = "tracing")]
-        info!(
+        debug!(
             "Receiving CAN frame on CAN interface {}: {:?}.",
             env.config.interfaces[data.interface], data.frame
         );
