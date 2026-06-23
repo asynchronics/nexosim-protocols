@@ -56,7 +56,7 @@ pub(crate) struct StampedMsgToYamcs {
 }
 
 /// Configuration for `ProtoYamcsBridge`.
-#[derive(Config, Debug)]
+#[derive(Config, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct YamcsConfig {
     /// Server port.
     #[setting(default = 7897)]

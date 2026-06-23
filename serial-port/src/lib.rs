@@ -25,7 +25,7 @@ use nexosim::simulation::ModelInjector;
 use nexosim_io_utils::port::{IoPort, IoThread};
 
 /// Serial port model instance configuration.
-#[derive(Config, Debug)]
+#[derive(Config, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SerialPortConfig {
     /// Baud rate.
     ///
