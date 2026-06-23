@@ -71,7 +71,7 @@ impl<T: Socket> Source for MioSocket<T> {
 }
 
 /// CAN port model instance config.
-#[derive(Config, Debug)]
+#[derive(Config, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CanPortConfig {
     /// List of CAN interfaces.
     #[setting(default = vec!["vcan0".into(), "vcan1".into()])]
