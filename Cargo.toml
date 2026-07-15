@@ -12,8 +12,8 @@ resolver = "3"
 [workspace.dependencies]
 bytes = { version = "1.10", features = ["serde"] }
 mio = { version = "1", features = ["os-poll", "os-ext"] }
-nexosim = { git = "https://github.com/asynchronics/nexosim.git", rev = "fe4223b00a71b88b81eeca158b7506e12f2ce18f"}
-nexosim-util = { git = "https://github.com/asynchronics/nexosim.git", rev = "fe4223b00a71b88b81eeca158b7506e12f2ce18f"}
+nexosim = { git = "https://github.com/asynchronics/nexosim.git", rev = "0094c9"}
+nexosim-util = { git = "https://github.com/asynchronics/nexosim.git", rev = "0094c9"}
 tracing = { version = "0.1.40", default-features = false, features = ["std"] }
 schematic = "0.18"
 serde = "1"
